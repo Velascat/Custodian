@@ -1,0 +1,7 @@
+repo_key: Custodian
+src_root: src
+tests_root: tests
+
+# Custodian audits itself with its own generic C1-C8 baseline. Eating
+# our own dog food: if a pattern is bad enough to flag in consumer
+# repos, it should be flagged here too.
