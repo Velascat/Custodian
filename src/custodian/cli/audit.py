@@ -6,17 +6,36 @@ from pathlib import Path
 from custodian.cli.runner import run_repo_audit
 
 
+def _human_summary(result) -> str:
+    by_status: dict[str, int] = {}
+    for pat in result.patterns.values():
+        by_status[pat["status"]] = by_status.get(pat["status"], 0) + pat["count"]
+    parts = ", ".join(f"{count} {status}" for status, count in sorted(by_status.items()))
+    return (
+        f"Custodian audit — repo: {result.repo_key or '(unset)'}\n"
+        f"  patterns: {len(result.patterns)}\n"
+        f"  findings: {result.total_findings}"
+        + (f"  ({parts})" if parts else "")
+    )
+
+
 def main():
     """
-    custodian-audit                       → cwd, default config
+    custodian-audit                       → cwd, default config (human + JSON)
     custodian-audit --repo /path/to/repo  → that repo
-    custodian-audit --all                  → walk configured repo list
-    custodian-audit --json                  → emit JSON only (default human + JSON)
+    custodian-audit --json                 → emit JSON only (machine-readable)
     """
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--all", action="store_true")
-    parser.add_argument("--json", action="store_true")
+    parser = argparse.ArgumentParser(description="Run a Custodian audit on a repo")
+    parser.add_argument("--repo", type=Path, default=Path.cwd(),
+                        help="Repository root containing .custodian.yaml (default: cwd)")
+    parser.add_argument("--json", action="store_true",
+                        help="Emit JSON only, no human summary header")
     args = parser.parse_args()
-    # v0.1 supports single repo only; --all is accepted for forward compatibility.
-    print(run_repo_audit(args.repo))
+
+    result = run_repo_audit(args.repo)
+
+    if args.json:
+        print(result.to_json())
+    else:
+        print(_human_summary(result))
+        print(result.to_json())

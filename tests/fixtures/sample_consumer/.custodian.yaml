@@ -13,6 +13,9 @@ audit:
 plugins:
   - module: _custodian.log_scanner:OCLogScanner
 
+detectors:
+  - module: _custodian.detectors:build_sample_detectors
+
 maintenance:
   stale_pr_days: 7
   stale_state_days: 90
