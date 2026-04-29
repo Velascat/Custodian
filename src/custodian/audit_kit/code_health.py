@@ -1,10 +1,59 @@
 from __future__ import annotations
 
-import fnmatch
 from pathlib import Path
 import re
 
 from custodian.audit_kit.detector import AuditContext, Detector, DetectorResult
+
+
+def _glob_to_regex(glob: str) -> re.Pattern[str]:
+    """Translate a path-style glob to a regex.
+
+    Supports:
+      ``*``    — any chars except path separator (``/``)
+      ``/**/`` — zero or more directory segments (recursive marker)
+      ``**``   — any chars including ``/`` (loose recursive form)
+      ``?``    — any single char except ``/``
+
+    Unlike stdlib ``fnmatch``, ``*`` here is path-component aware so
+    ``src/foo/*.py`` matches ``src/foo/bar.py`` but **not**
+    ``src/foo/sub/bar.py``. Use ``**`` for recursive intent.
+
+    The ``/**/`` form is special-cased so ``src/pkg/**/*.py`` matches
+    both ``src/pkg/leaf.py`` (zero dir segments) and
+    ``src/pkg/sub/leaf.py`` (one or more).
+    """
+    # Pre-pass: collapse `/**/` to a sentinel that becomes `(?:/.*/|/)` —
+    # this matches a single separator OR `/anything/`, i.e. zero or more
+    # directory segments. Done before per-char processing so the special
+    # form isn't mistaken for `**` followed by `/`.
+    SENTINEL = "\x00DOUBLESTAR_DIR\x00"
+    glob = glob.replace("/**/", SENTINEL)
+
+    out: list[str] = []
+    i = 0
+    while i < len(glob):
+        if glob.startswith(SENTINEL, i):
+            out.append("(?:/.*/|/)")
+            i += len(SENTINEL)
+            continue
+        ch = glob[i]
+        if ch == "*":
+            if i + 1 < len(glob) and glob[i + 1] == "*":
+                out.append(".*")
+                i += 2
+                continue
+            out.append("[^/]*")
+        elif ch == "?":
+            out.append("[^/]")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return re.compile("\\A" + "".join(out) + "\\Z")
+
+
+def _matches_any(rel_path: str, globs: list[str]) -> bool:
+    return any(_glob_to_regex(g).match(rel_path) for g in globs)
 
 
 def _exclude_globs(context: AuditContext, detector_id: str) -> list[str]:
@@ -16,7 +65,8 @@ def _exclude_globs(context: AuditContext, detector_id: str) -> list[str]:
             C2: ["src/cli/**", "src/foo/cli.py"]
 
     Globs are matched against each file's path relative to ``repo_root``
-    via fnmatch. A file is excluded if any glob matches. Repos use this
+    via the glob matcher above (`*` is path-aware, `**` is recursive).
+    A file is excluded if any glob matches. Repos use this
     to opt specific files out of a generic detector that doesn't fit
     (e.g. C2 'print statements' is wrong for a CLI tool's command files).
     """
@@ -37,7 +87,7 @@ def _py_files(context: AuditContext, detector_id: str | None = None) -> list[Pat
     kept: list[Path] = []
     for p in paths:
         rel = str(p.relative_to(repo_root))
-        if any(fnmatch.fnmatch(rel, g) for g in globs):
+        if _matches_any(rel, globs):
             continue
         kept.append(p)
     return kept
@@ -99,7 +149,7 @@ def detect_c7(context: AuditContext) -> DetectorResult:
     if globs:
         repo_root = context.repo_root
         paths = [p for p in paths
-                 if not any(fnmatch.fnmatch(str(p.relative_to(repo_root)), g) for g in globs)]
+                 if not _matches_any(str(p.relative_to(repo_root)), globs)]
     return _count_pattern(paths, re.compile(r"assert\s+True"))
 
 

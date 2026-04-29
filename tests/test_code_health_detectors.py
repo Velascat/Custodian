@@ -72,6 +72,44 @@ def test_exclude_paths_supports_globs(tmp_path):
     assert counts["C1"] == 1  # only lib.py's TODO
 
 
+def test_exclude_paths_recursive_glob(tmp_path):
+    """`**` matches any depth, unlike single `*` which is path-component-aware."""
+    src = tmp_path / "src"
+    (src / "pkg" / "deep" / "nested").mkdir(parents=True)
+    (src / "outside.py").write_text("# TODO\n", encoding="utf-8")
+    (src / "pkg" / "shallow.py").write_text("# TODO\n", encoding="utf-8")
+    (src / "pkg" / "deep" / "mid.py").write_text("# TODO\n", encoding="utf-8")
+    (src / "pkg" / "deep" / "nested" / "leaf.py").write_text("# TODO\n", encoding="utf-8")
+
+    context = AuditContext(
+        repo_root=tmp_path,
+        src_root=src,
+        tests_root=tmp_path,
+        config={"audit": {"exclude_paths": {"C1": ["src/pkg/**/*.py"]}}},
+        plugin_modules=[],
+    )
+    counts = {det.id: det.detect(context).count for det in build_code_health_detectors()}
+    assert counts["C1"] == 1  # only outside.py survives the glob
+
+
+def test_exclude_paths_single_star_is_path_aware(tmp_path):
+    """`*.py` does NOT cross directory separators — that's the `**` job."""
+    src = tmp_path / "src"
+    (src / "sub").mkdir(parents=True)
+    (src / "top.py").write_text("# TODO\n", encoding="utf-8")
+    (src / "sub" / "deep.py").write_text("# TODO\n", encoding="utf-8")
+
+    context = AuditContext(
+        repo_root=tmp_path,
+        src_root=src,
+        tests_root=tmp_path,
+        config={"audit": {"exclude_paths": {"C1": ["src/*.py"]}}},
+        plugin_modules=[],
+    )
+    counts = {det.id: det.detect(context).count for det in build_code_health_detectors()}
+    assert counts["C1"] == 1  # sub/deep.py NOT excluded by single-star glob
+
+
 def test_exclude_paths_only_applies_to_named_detector(tmp_path):
     """An entry under C2 must not silence C1, etc."""
     src = tmp_path / "src"
