@@ -1,0 +1,18 @@
+repo_key: SampleConsumer
+src_root: src
+tests_root: tests
+
+audit:
+  stale_handlers:
+    - handle_old_thing
+    - run_legacy_loop
+  common_words:
+    - completed
+    - in_progress
+
+plugins:
+  - module: _custodian.log_scanner:OCLogScanner
+
+maintenance:
+  stale_pr_days: 7
+  stale_state_days: 90
