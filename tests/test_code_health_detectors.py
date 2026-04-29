@@ -33,3 +33,58 @@ def test_c1_to_c8_detectors_on_fixture(tmp_path):
     assert by_id["C6"] == 1
     assert by_id["C7"] == 1
     assert by_id["C8"] == 1
+
+
+def test_exclude_paths_skips_matched_files(tmp_path):
+    """audit.exclude_paths.<id> filters specific files from a single detector."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "lib.py").write_text("x = 1\n", encoding="utf-8")
+    (src / "cli.py").write_text("print('hello')\nprint('world')\n", encoding="utf-8")
+
+    context = AuditContext(
+        repo_root=tmp_path,
+        src_root=src,
+        tests_root=tmp_path,
+        config={"audit": {"exclude_paths": {"C2": ["src/cli.py"]}}},
+        plugin_modules=[],
+    )
+
+    by_id = {det.id: det.detect(context).count for det in build_code_health_detectors()}
+    assert by_id["C2"] == 0  # cli.py excluded; lib.py has no prints
+
+
+def test_exclude_paths_supports_globs(tmp_path):
+    src = tmp_path / "src"
+    (src / "cli").mkdir(parents=True)
+    (src / "lib.py").write_text("# TODO\n", encoding="utf-8")
+    (src / "cli" / "a.py").write_text("# TODO\n# TODO\n", encoding="utf-8")
+    (src / "cli" / "b.py").write_text("# TODO\n", encoding="utf-8")
+
+    context = AuditContext(
+        repo_root=tmp_path,
+        src_root=src,
+        tests_root=tmp_path,
+        config={"audit": {"exclude_paths": {"C1": ["src/cli/*.py"]}}},
+        plugin_modules=[],
+    )
+    counts = {det.id: det.detect(context).count for det in build_code_health_detectors()}
+    assert counts["C1"] == 1  # only lib.py's TODO
+
+
+def test_exclude_paths_only_applies_to_named_detector(tmp_path):
+    """An entry under C2 must not silence C1, etc."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "noisy.py").write_text("# TODO\nprint('x')\n", encoding="utf-8")
+
+    context = AuditContext(
+        repo_root=tmp_path,
+        src_root=src,
+        tests_root=tmp_path,
+        config={"audit": {"exclude_paths": {"C2": ["src/noisy.py"]}}},
+        plugin_modules=[],
+    )
+    counts = {det.id: det.detect(context).count for det in build_code_health_detectors()}
+    assert counts["C1"] == 1   # TODO still reported
+    assert counts["C2"] == 0   # print suppressed by exclude
