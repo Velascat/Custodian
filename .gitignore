@@ -1,5 +1,26 @@
+# Python
 __pycache__/
 *.pyc
-.pytest_cache/
-.venv/
+*.pyo
+*.pyd
 *.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Local operator/agent context
+.console/
+CLAUDE.md
+.claude/
+
+# Build artifacts
+dist/
+build/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
