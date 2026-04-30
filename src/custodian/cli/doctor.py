@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from custodian.audit_kit.code_health import build_code_health_detectors
 from custodian.cli.runner import load_config
 from custodian.plugins.loader import load_detectors, load_plugins
 
@@ -40,11 +41,18 @@ def main():
         except Exception as exc:
             warnings.append(f"plugins error: {exc}")
         try:
-            load_detectors(config)
+            extra = load_detectors(config)
         except Exception as exc:
             warnings.append(f"detectors error: {exc}")
+            extra = []
     finally:
         sys.path.remove(str(args.repo))
+
+    known_ids = {d.id for d in build_code_health_detectors() + extra}
+    exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
+    for det_id in exclude_paths:
+        if det_id not in known_ids:
+            warnings.append(f"exclude_paths references unknown detector: {det_id!r}")
 
     if warnings:
         msg = "; ".join(warnings)
