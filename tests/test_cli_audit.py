@@ -101,3 +101,67 @@ class TestFailOnFindings:
         out = capsys.readouterr().out
         data = json.loads(out)
         assert "findings" in data
+
+
+class TestNoJsonFlag:
+    def test_no_json_omits_json_block(self, capsys):
+        from custodian.cli.audit import main
+
+        with patch("sys.argv", [
+            "custodian-audit", "--repo", str(FIXTURE_REPO), "--no-json", "--only", "C1",
+        ]):
+            main()
+        out = capsys.readouterr().out
+        assert "Custodian audit" in out
+        # JSON block starts with `{` on its own line — must not be present
+        assert not any(line.strip() == "{" for line in out.splitlines())
+
+    def test_default_includes_json(self, capsys):
+        from custodian.cli.audit import main
+
+        with patch("sys.argv", [
+            "custodian-audit", "--repo", str(FIXTURE_REPO), "--only", "C1",
+        ]):
+            main()
+        out = capsys.readouterr().out
+        assert "Custodian audit" in out  # human header
+        # JSON block is also present
+        lines = [l for l in out.splitlines() if l.strip().startswith("{")]
+        assert lines  # at least one JSON line
+
+
+class TestListDetectors:
+    def test_list_detectors_exits_without_running_audit(self, capsys):
+        from custodian.cli.audit import main
+
+        with patch("sys.argv", [
+            "custodian-audit", "--repo", str(FIXTURE_REPO), "--list-detectors",
+        ]):
+            main()
+        out = capsys.readouterr().out
+        assert "C1" in out
+        assert "C2" in out
+        assert "SEV" in out  # header row
+        # Must not include JSON (not running an audit)
+        assert '"schema_version"' not in out
+
+    def test_list_detectors_shows_all_generic_codes(self, capsys):
+        from custodian.cli.audit import main
+
+        with patch("sys.argv", [
+            "custodian-audit", "--repo", str(FIXTURE_REPO), "--list-detectors",
+        ]):
+            main()
+        out = capsys.readouterr().out
+        for code in ("C1", "C2", "C3", "C9", "C13", "C15"):
+            assert code in out
+
+
+class TestMinSeverity:
+    def test_high_only_skips_low_detectors(self):
+        from custodian.cli.runner import run_repo_audit
+        result_all = run_repo_audit(FIXTURE_REPO)
+        result_high = run_repo_audit(FIXTURE_REPO, min_severity="high")
+        assert len(result_high.patterns) < len(result_all.patterns)
+        for pat in result_high.patterns.values():
+            assert pat["severity"] == "high"
