@@ -131,6 +131,8 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C14", "open() call missing explicit encoding=",          "open",     detect_c14,  MEDIUM),
         Detector("C15", "f-string passed directly to logger call",         "open",     detect_c15,  LOW),
         Detector("C16", "Path.read_text/write_text without encoding=",     "open",     detect_c16,  LOW),
+        Detector("C17", "len(x) == 0 / len(x) > 0 (prefer truthiness)",   "open",     detect_c17,  LOW),
+        Detector("C18", "f-string with no interpolation (drop the f)",     "open",     detect_c18,  LOW),
     ]
 
 
@@ -412,6 +414,37 @@ def detect_c15(context: AuditContext) -> DetectorResult:
     """
     return _count_pattern(_py_files(context, "C15"), _FSTRING_LOGGER_RE)
 
+
+_LEN_COMPARE_RE = re.compile(r"\blen\([^)]+\)\s*(?:==|!=|>)\s*0\b")
+
+def detect_c18(context: AuditContext) -> DetectorResult:
+    """Flag f-strings that contain no interpolation expression.
+
+    ``f"plain text"`` is identical to ``"plain text"`` — the ``f`` prefix
+    serves no purpose, adds cognitive noise, and hints that the string may
+    have been copied from an adjacent interpolated line without cleanup.
+
+    Does not flag triple-quoted f-strings (which are harder to reason about
+    and sometimes used as doc templates) or f-strings containing backslash
+    sequences.
+    """
+    return _count_pattern(_py_files(context, "C18"), _USELESS_FSTRING_RE)
+
+
+def detect_c17(context: AuditContext) -> DetectorResult:
+    """Flag ``len(x) == 0``, ``len(x) != 0``, and ``len(x) > 0`` comparisons.
+
+    Python objects expose truthiness via ``__bool__``; comparing their length
+    to zero is redundant and slightly slower.  Prefer ``if not x:`` instead of
+    ``if len(x) == 0:`` and ``if x:`` instead of ``if len(x) > 0:``.
+
+    The one case where this doesn't hold is objects that define ``__len__``
+    but not ``__bool__`` differently — rare in practice.
+    """
+    return _count_pattern(_py_files(context, "C17"), _LEN_COMPARE_RE)
+
+
+_USELESS_FSTRING_RE = re.compile(r"""\bf(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
 
 _PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
 

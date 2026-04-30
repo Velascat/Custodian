@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+from custodian.cli import colors
 from custodian.cli.runner import run_repo_audit
 
 _SEVERITY_LABELS = {"high": "HIGH", "medium": "MED ", "low": "LOW "}
@@ -21,19 +23,30 @@ def _human_summary(result) -> str:
         sev = pat.get("severity", "medium")
         sev_counts[sev] = sev_counts.get(sev, 0) + 1
 
+    findings_str = str(result.total_findings)
+    if result.total_findings > 0:
+        findings_str = colors.red(findings_str)
+        sev_suffix = (
+            f"  ({colors.red('HIGH=' + str(sev_counts['high']))} "
+            f"{colors.yellow('MED=' + str(sev_counts['medium']))} "
+            f"LOW={sev_counts['low']})"
+        )
+    else:
+        findings_str = colors.green(findings_str)
+        sev_suffix = ""
     lines = [
         f"Custodian audit — repo: {result.repo_key or '(unset)'}",
         f"  patterns: {len(result.patterns)}",
-        f"  findings: {result.total_findings}"
-        + (f"  (HIGH={sev_counts['high']} MED={sev_counts['medium']} LOW={sev_counts['low']})"
-           if result.total_findings > 0 else ""),
+        f"  findings: {findings_str}{sev_suffix}",
     ]
     if noisy:
         lines.append("")
         for code, pat in noisy.items():
-            sev = _SEVERITY_LABELS.get(pat.get("severity", "medium"), "MED ")
+            sev_key = pat.get("severity", "medium")
+            sev = _SEVERITY_LABELS.get(sev_key, "MED ")
+            sev_colored = colors.severity_color(sev_key, f"[{sev}]")
             lines.append(
-                f"  [{sev}] [{code}] {pat['description']} — {pat['count']} finding(s)"
+                f"  {sev_colored} [{code}] {pat['description']} — {pat['count']} finding(s)"
             )
             for sample in pat.get("samples", [])[:3]:
                 lines.append(f"        {sample}")
@@ -56,7 +69,8 @@ def _list_detectors(repo: Path) -> None:
     print(f"{'-'*6} {'-'*6} {'-'*10} {'-'*40}")
     for d in detectors:
         sev = _SEVERITY_LABELS.get(d.severity, "MED ").strip()
-        print(f"{d.id:<6} {sev:<6} {d.status:<10} {d.description}")
+        sev_colored = colors.severity_color(d.severity or "medium", f"{sev:<6}")
+        print(f"{d.id:<6} {sev_colored} {d.status:<10} {d.description}")
 
 
 def main():
@@ -86,7 +100,12 @@ def main():
                         help="Suppress JSON block; print human summary only")
     parser.add_argument("--list-detectors", action="store_true",
                         help="Print all available detector IDs and descriptions, then exit")
+    parser.add_argument("--no-color", action="store_true",
+                        help="Disable ANSI color output")
     args = parser.parse_args()
+
+    if args.no_color:
+        os.environ["NO_COLOR"] = "1"
 
     if args.list_detectors:
         _list_detectors(args.repo)

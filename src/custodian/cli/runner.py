@@ -8,7 +8,9 @@ from pathlib import Path
 import yaml
 
 from custodian.audit_kit.code_health import build_code_health_detectors
-from custodian.audit_kit.detector import AuditContext, run_audit
+from custodian.audit_kit.detector import AnalysisGraph, AuditContext, run_audit
+from custodian.audit_kit.detectors.structure import build_structure_detectors
+from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.result import AuditResult
 from custodian.plugins.loader import load_detectors, load_plugins
 
@@ -49,7 +51,10 @@ def run_repo_audit(
 
     src_root   = repo_root / config.get("src_root", "src")
     tests_root = repo_root / config.get("tests_root", "tests")
-    detectors  = build_code_health_detectors() + extra
+    detectors  = (build_code_health_detectors()
+                  + build_structure_detectors()
+                  + build_stub_detectors()
+                  + extra)
 
     if only:
         detectors = [d for d in detectors if d.id in only]
@@ -60,5 +65,32 @@ def run_repo_audit(
         tests_root=tests_root,
         config=config,
         plugin_modules=plugins,
+        graph=_build_analysis_graph(context=None, detectors=detectors,
+                                    src_root=src_root, repo_root=repo_root),
     )
     return run_audit(context=context, detectors=detectors, min_severity=min_severity)
+
+
+def _build_analysis_graph(
+    context,
+    detectors,
+    src_root: Path,
+    repo_root: Path,
+) -> AnalysisGraph:
+    needed: set[str] = set()
+    for d in detectors:
+        needed |= d.needs
+    if not needed:
+        return AnalysisGraph()
+
+    graph = AnalysisGraph()
+
+    if "import_graph" in needed:
+        from custodian.audit_kit.passes.import_graph import build_import_graph
+        graph.import_graph = build_import_graph(src_root, repo_root)
+
+    if "ast_forest" in needed:
+        from custodian.audit_kit.passes.ast_forest import build_ast_forest
+        graph.ast_forest = build_ast_forest(src_root)
+
+    return graph

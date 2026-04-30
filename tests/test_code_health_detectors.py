@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14, detect_c15, detect_c16
+from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14, detect_c15, detect_c16, detect_c17, detect_c18
 from custodian.audit_kit.detector import AuditContext
 
 
@@ -404,3 +404,62 @@ def test_c16_skips_write_text_with_encoding(tmp_path):
 def test_c16_skips_read_bytes(tmp_path):
     ctx = _ctx(tmp_path, 'from pathlib import Path\nPath("f.bin").read_bytes()\n')
     assert detect_c16(ctx).count == 0
+
+
+# ── C17: len(x) == 0 / len(x) > 0 comparisons ───────────────────────────────
+
+def test_c17_flags_len_eq_zero(tmp_path):
+    ctx = _ctx(tmp_path, "if len(items) == 0:\n    pass\n")
+    assert detect_c17(ctx).count == 1
+
+
+def test_c17_flags_len_ne_zero(tmp_path):
+    ctx = _ctx(tmp_path, "if len(items) != 0:\n    pass\n")
+    assert detect_c17(ctx).count == 1
+
+
+def test_c17_flags_len_gt_zero(tmp_path):
+    ctx = _ctx(tmp_path, "if len(items) > 0:\n    pass\n")
+    assert detect_c17(ctx).count == 1
+
+
+def test_c17_skips_truthiness(tmp_path):
+    ctx = _ctx(tmp_path, "if items:\n    pass\nif not items:\n    pass\n")
+    assert detect_c17(ctx).count == 0
+
+
+def test_c17_skips_nonzero_comparison(tmp_path):
+    ctx = _ctx(tmp_path, "if len(items) > 5:\n    pass\n")
+    assert detect_c17(ctx).count == 0
+
+
+def test_c17_flags_inline_expression(tmp_path):
+    ctx = _ctx(tmp_path, 'status = "ok" if len(errors) == 0 else "fail"\n')
+    assert detect_c17(ctx).count == 1
+
+
+# ── C18: f-string with no interpolation ──────────────────────────────────────
+
+def test_c18_flags_plain_fstring(tmp_path):
+    ctx = _ctx(tmp_path, 'msg = f"hello world"\n')
+    assert detect_c18(ctx).count == 1
+
+
+def test_c18_flags_single_quote_fstring(tmp_path):
+    ctx = _ctx(tmp_path, "msg = f'hello world'\n")
+    assert detect_c18(ctx).count == 1
+
+
+def test_c18_skips_interpolated_fstring(tmp_path):
+    ctx = _ctx(tmp_path, 'msg = f"hello {name}"\n')
+    assert detect_c18(ctx).count == 0
+
+
+def test_c18_skips_plain_string(tmp_path):
+    ctx = _ctx(tmp_path, 'msg = "hello world"\n')
+    assert detect_c18(ctx).count == 0
+
+
+def test_c18_flags_continuation_line(tmp_path):
+    ctx = _ctx(tmp_path, 'raise ValueError(\n    f"context: {x}"\n    f"no interpolation here"\n)\n')
+    assert detect_c18(ctx).count == 1

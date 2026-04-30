@@ -42,3 +42,10 @@ audit:
       # code_health.py mentions Path.read_text() and Path.write_text() in the
       # C16 docstring — not actual pathlib calls.
       - src/custodian/audit_kit/code_health.py
+    C17:
+      # code_health.py contains len(x) == 0 / len(x) > 0 as regex pattern
+      # strings in the C17 detector docstring — not actual comparisons.
+      - src/custodian/audit_kit/code_health.py
+    C18:
+      # code_health.py uses f"plain text" as an example in the C18 docstring.
+      - src/custodian/audit_kit/code_health.py

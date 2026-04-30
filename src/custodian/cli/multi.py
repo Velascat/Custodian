@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
+from custodian.cli import colors
 from custodian.cli.runner import run_repo_audit
 
 _SEV_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -68,7 +70,12 @@ def main():
                         help="Exit 1 if any repo has findings")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="After the table, print per-repo finding details for repos with findings")
+    parser.add_argument("--no-color", action="store_true",
+                        help="Disable ANSI color output")
     args = parser.parse_args()
+
+    if args.no_color:
+        os.environ["NO_COLOR"] = "1"
 
     if args.repos_file:
         text = args.repos_file.read_text(encoding="utf-8")
@@ -135,10 +142,32 @@ def _print_table(results: list) -> None:
         name = (result.repo_key or str(repo))[:col_repo]
         counts = _severity_counts(result.patterns)
         h, m, l = counts["high"], counts["medium"], counts["low"]
-        status = "clean" if result.total_findings == 0 else "FAIL"
+        if result.total_findings == 0:
+            status = colors.green("clean")
+            findings_col = colors.green(f"{result.total_findings:>8}")
+        else:
+            status = colors.red("FAIL ")
+            findings_col = colors.red(f"{result.total_findings:>8}")
+        h_col = colors.red(f"{h:>4}") if h > 0 else f"{h:>4}"
+        m_col = colors.yellow(f"{m:>4}") if m > 0 else f"{m:>4}"
         print(
-            f"{name:<{col_repo}} | {result.total_findings:>8} | {h:>4} | {m:>4} | {l:>4} | {status}"
+            f"{name:<{col_repo}} | {findings_col} | {h_col} | {m_col} | {l:>4} | {status}"
         )
+
+    # Summary footer
+    ok = sum(1 for _, r, e in results if r and e is None and r.total_findings == 0)
+    fail = sum(1 for _, r, e in results if r and e is None and r.total_findings > 0)
+    errs = sum(1 for _, _, e in results if e)
+    total_findings = sum(r.total_findings for _, r, e in results if r and e is None)
+    print(sep)
+    parts = [f"{len(results)} repos:"]
+    parts.append(colors.green(f"{ok} clean") if ok else "0 clean")
+    if fail:
+        parts.append(colors.red(f"{fail} failing"))
+    if errs:
+        parts.append(colors.red(f"{errs} errors"))
+    parts.append(f"| {total_findings} total findings")
+    print("  " + "  ".join(parts))
 
 
 def _print_verbose(results: list) -> None:
@@ -157,8 +186,10 @@ def _print_verbose(results: list) -> None:
         for code, pat in result.patterns.items():
             if pat.get("count", 0) == 0:
                 continue
-            sev = _SEV_LABEL.get(pat.get("severity"), "    ").strip()
-            print(f"  [{sev}] [{code}] {pat['description']} — {pat['count']} finding(s)")
+            sev_key = pat.get("severity", "medium")
+            sev = _SEV_LABEL.get(sev_key, "    ").strip()
+            sev_colored = colors.severity_color(sev_key, f"[{sev}]")
+            print(f"  {sev_colored} [{code}] {pat['description']} — {pat['count']} finding(s)")
             for sample in pat.get("samples", [])[:5]:
                 print(f"        {sample}")
         print()

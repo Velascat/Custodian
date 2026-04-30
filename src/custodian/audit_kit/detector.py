@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import pathlib
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from custodian.audit_kit.result import AuditResult
+
+if TYPE_CHECKING:
+    from custodian.audit_kit.passes.import_graph import ImportGraph
+    from custodian.audit_kit.passes.ast_forest import AstForest
 
 # Severity constants — use these names in Detector definitions
 HIGH   = "high"
@@ -17,13 +21,33 @@ _SEVERITY_ORDER = {HIGH: 0, MEDIUM: 1, LOW: 2}
 
 
 @dataclass
+class AnalysisGraph:
+    """Whole-repo derived data built once and shared across cross-file detectors.
+
+    Detectors declare which passes they need via ``Detector.needs``. The runner
+    builds only the passes required by active detectors, so file-local detectors
+    (C1-C18) never pay the cost of graph construction.
+
+    Pass names (strings used in ``Detector.needs``):
+      ``"import_graph"``  — module-level import relationships
+      ``"ast_forest"``    — pre-parsed ASTs for every .py file in src_root
+    """
+    import_graph: ImportGraph | None = None
+    ast_forest: AstForest | None = None
+
+
+@dataclass
 class Detector:
-    """One audit pattern. id is repo-namespaced (e.g. "C1", "F3", "G12").
+    """One audit pattern. id is repo-namespaced (e.g. "C1", "S2", "U1").
 
     severity: "high" | "medium" | "low"  (default "medium")
       - high:   code that can hide bugs or break prod (bare except, breakpoints)
       - medium: quality issues that should be fixed but are not urgent
       - low:    tracked debt / style that does not block work
+
+    needs: frozenset of pass names this detector requires in context.graph.
+      e.g. frozenset({"import_graph"}) or frozenset({"ast_forest"}).
+      File-local detectors leave this empty (the default).
     """
 
     id: str
@@ -31,6 +55,7 @@ class Detector:
     status: str  # "fixed" | "open" | "partial" | "deferred"
     detect: Callable[["AuditContext"], "DetectorResult"]
     severity: str = field(default=MEDIUM)
+    needs: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -41,13 +66,18 @@ class DetectorResult:
 
 @dataclass
 class AuditContext:
-    """Passed to every detector. Carries paths + parsed config."""
+    """Passed to every detector. Carries paths + parsed config.
+
+    graph is populated by the runner before running any detector that declares
+    a non-empty ``needs`` set. File-local detectors may ignore it entirely.
+    """
 
     repo_root: pathlib.Path
     src_root: pathlib.Path
     tests_root: pathlib.Path
     config: dict
     plugin_modules: list
+    graph: AnalysisGraph | None = None
 
 
 def run_audit(
