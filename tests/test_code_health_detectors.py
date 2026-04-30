@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14, detect_c15
+from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14, detect_c15, detect_c16
 from custodian.audit_kit.detector import AuditContext
 
 
@@ -377,3 +377,30 @@ def test_c15_skips_lazy_format(tmp_path):
 def test_c15_skips_plain_string(tmp_path):
     ctx = _ctx(tmp_path, 'import logging\nlogger = logging.getLogger(__name__)\nlogger.warning("static message")\n')
     assert detect_c15(ctx).count == 0
+
+
+# ── C16: Path.read_text/write_text without encoding ──────────────────────────
+
+def test_c16_flags_read_text_no_args(tmp_path):
+    ctx = _ctx(tmp_path, 'from pathlib import Path\nPath("f.txt").read_text()\n')
+    assert detect_c16(ctx).count == 1
+
+
+def test_c16_flags_write_text_no_encoding(tmp_path):
+    ctx = _ctx(tmp_path, 'from pathlib import Path\nPath("f.txt").write_text("hello")\n')
+    assert detect_c16(ctx).count == 1
+
+
+def test_c16_skips_read_text_with_encoding(tmp_path):
+    ctx = _ctx(tmp_path, 'from pathlib import Path\nPath("f.txt").read_text(encoding="utf-8")\n')
+    assert detect_c16(ctx).count == 0
+
+
+def test_c16_skips_write_text_with_encoding(tmp_path):
+    ctx = _ctx(tmp_path, 'from pathlib import Path\nPath("f.txt").write_text("hi", encoding="utf-8")\n')
+    assert detect_c16(ctx).count == 0
+
+
+def test_c16_skips_read_bytes(tmp_path):
+    ctx = _ctx(tmp_path, 'from pathlib import Path\nPath("f.bin").read_bytes()\n')
+    assert detect_c16(ctx).count == 0
