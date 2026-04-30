@@ -17,6 +17,10 @@ audit:
       - src/custodian/audit_kit/code_health.py
     C6:
       - src/custodian/audit_kit/code_health.py
+    C10:
+      # code_health.py mentions datetime.now() / utcnow() in the C10 detector's
+      # docstring and regex — not actual naive datetime calls.
+      - src/custodian/audit_kit/code_health.py
     C2:
       - src/custodian/cli/audit.py
       - src/custodian/cli/doctor.py

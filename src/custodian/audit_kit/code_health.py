@@ -112,15 +112,16 @@ def _count_pattern(paths: list[Path], pattern: re.Pattern[str]) -> DetectorResul
 
 def build_code_health_detectors() -> list[Detector]:
     return [
-        Detector("C1", "TODO markers in source",                          "open",     detect_c1,  LOW),
-        Detector("C2", "print statements in source",                      "open",     detect_c2,  MEDIUM),
-        Detector("C3", "bare except usage",                               "open",     detect_c3,  HIGH),
-        Detector("C4", "pass statements in exception handlers",           "partial",  detect_c4,  MEDIUM),
-        Detector("C5", "debugger breakpoints",                            "open",     detect_c5,  HIGH),
-        Detector("C6", "FIXME markers",                                   "open",     detect_c6,  LOW),
-        Detector("C7", "assert True usage",                               "deferred", detect_c7,  LOW),
-        Detector("C8", "stale handler references",                        "partial",  detect_c8,  MEDIUM),
-        Detector("C9", "broad except Exception without a logger call",    "open",     detect_c9,  HIGH),
+        Detector("C1",  "TODO markers in source",                          "open",     detect_c1,   LOW),
+        Detector("C2",  "print statements in source",                      "open",     detect_c2,   MEDIUM),
+        Detector("C3",  "bare except usage",                               "open",     detect_c3,   HIGH),
+        Detector("C4",  "pass statements in exception handlers",           "partial",  detect_c4,   MEDIUM),
+        Detector("C5",  "debugger breakpoints",                            "open",     detect_c5,   HIGH),
+        Detector("C6",  "FIXME markers",                                   "open",     detect_c6,   LOW),
+        Detector("C7",  "assert True usage",                               "deferred", detect_c7,   LOW),
+        Detector("C8",  "stale handler references",                        "partial",  detect_c8,   MEDIUM),
+        Detector("C9",  "broad except Exception without a logger call",    "open",     detect_c9,   HIGH),
+        Detector("C10", "naive datetime.now() / utcnow() usage",           "open",     detect_c10,  MEDIUM),
     ]
 
 
@@ -233,3 +234,19 @@ def detect_c9(context: AuditContext) -> DetectorResult:
                 rel = path.relative_to(context.repo_root)
                 samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
     return DetectorResult(count=count, samples=samples)
+
+
+def detect_c10(context: AuditContext) -> DetectorResult:
+    """Flag ``datetime.now()`` (no timezone) and ``datetime.utcnow()``.
+
+    Both produce naive datetimes.  ``datetime.now()`` silently returns local
+    time which is ambiguous in server code; ``datetime.utcnow()`` is deprecated
+    in Python 3.12 and also naive.  Use ``datetime.now(UTC)`` or
+    ``datetime.now(timezone.utc)`` instead.
+
+    The detector ignores occurrences inside string literals or comments by
+    checking that the token is followed by ``()`` with no argument:
+    ``datetime.now(`` followed immediately by ``)`` (no tz argument).
+    """
+    pattern = re.compile(r"\bdatetime\.(?:now\(\)|utcnow\(\))")
+    return _count_pattern(_py_files(context, "C10"), pattern)
