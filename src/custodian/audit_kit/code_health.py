@@ -123,6 +123,7 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C9",  "broad except Exception without a logger call",    "open",     detect_c9,   HIGH),
         Detector("C10", "naive datetime.now() / utcnow() usage",           "open",     detect_c10,  MEDIUM),
         Detector("C11", "subprocess call without timeout",                 "open",     detect_c11,  MEDIUM),
+        Detector("C12", "bare # type: ignore without error code",          "open",     detect_c12,  LOW),
     ]
 
 
@@ -293,6 +294,18 @@ def detect_c11(context: AuditContext) -> DetectorResult:
                 rel = path.relative_to(context.repo_root)
                 samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
     return DetectorResult(count=count, samples=samples)
+
+
+def detect_c12(context: AuditContext) -> DetectorResult:
+    """Flag ``# type: ignore`` comments without a specific error code.
+
+    ``# type: ignore[attr-defined]`` is precise and self-documenting.
+    Bare ``# type: ignore`` suppresses all type errors on the line, making
+    it easy to accidentally silence unrelated future errors. Always specify
+    the code(s) being suppressed.
+    """
+    pattern = re.compile(r"#\s*type:\s*ignore\s*$", re.MULTILINE)
+    return _count_pattern(_py_files(context, "C12"), pattern)
 
 
 def detect_c10(context: AuditContext) -> DetectorResult:

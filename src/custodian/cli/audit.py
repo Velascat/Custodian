@@ -55,6 +55,8 @@ def main():
                              "(high > medium > low). Default: low (run all).")
     parser.add_argument("--fail-on-findings", action="store_true",
                         help="Exit with code 1 if any findings are present")
+    parser.add_argument("--no-json", action="store_true",
+                        help="Suppress JSON block; print human summary only")
     args = parser.parse_args()
 
     only: set[str] | None = None
@@ -65,6 +67,8 @@ def main():
 
     if args.json:
         print(result.to_json())
+    elif args.no_json:
+        print(_human_summary(result))
     else:
         print(_human_summary(result))
         print(result.to_json())
