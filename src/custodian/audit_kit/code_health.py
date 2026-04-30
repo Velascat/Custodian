@@ -124,6 +124,8 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C10", "naive datetime.now() / utcnow() usage",           "open",     detect_c10,  MEDIUM),
         Detector("C11", "subprocess call without timeout",                 "open",     detect_c11,  MEDIUM),
         Detector("C12", "bare # type: ignore without error code",          "open",     detect_c12,  LOW),
+        Detector("C13", "assert used for runtime validation in src",       "open",     detect_c13,  MEDIUM),
+        Detector("C14", "open() call missing explicit encoding=",          "open",     detect_c14,  MEDIUM),
     ]
 
 
@@ -322,3 +324,65 @@ def detect_c10(context: AuditContext) -> DetectorResult:
     """
     pattern = re.compile(r"\bdatetime\.(?:now\(\)|utcnow\(\))")
     return _count_pattern(_py_files(context, "C10"), pattern)
+
+
+_ASSERT_RE = re.compile(r"^\s+assert\s+", re.MULTILINE)
+
+
+def detect_c13(context: AuditContext) -> DetectorResult:
+    """Flag ``assert`` statements in production source (not tests).
+
+    Python disables assertions when run with ``python -O`` (optimised mode),
+    so using ``assert`` for runtime validation silently becomes a no-op.
+    Use an explicit ``if not condition: raise ValueError(...)`` instead.
+
+    Only scans ``src_root`` (not ``tests_root``) because assertions are the
+    correct pattern in test code.
+    """
+    return _count_pattern(_py_files(context, "C13"), _ASSERT_RE)
+
+
+_OPEN_CALL_RE = re.compile(r"(?<![.\w])open\s*\(")
+_BINARY_MODES = frozenset([
+    '"rb"', "'rb'", '"wb"', "'wb'", '"ab"', "'ab'",
+    '"rb+"', "'rb+'", '"wb+"', "'wb+'", '"ab+"', "'ab+'",
+    '"r+b"', "'r+b'", '"w+b"', "'w+b'", '"a+b"', "'a+b'",
+    '"xb"', "'xb'", '"xb+"', "'xb+'", '"x+b"', "'x+b'",
+    '"br"', "'br'", '"bw"', "'bw'", '"ba"', "'ba'", '"bx"', "'bx'",
+    '"b"', "'b'",
+])
+
+
+def detect_c14(context: AuditContext) -> DetectorResult:
+    """Flag ``open()`` calls that lack an explicit ``encoding=`` argument.
+
+    Without ``encoding=``, Python uses the platform locale encoding (often
+    UTF-8 on Linux but CP1252 on Windows), making file I/O non-portable.
+    Binary-mode calls (``"rb"``, ``"wb"``, etc.) are excluded — they never
+    need ``encoding=``.
+
+    Use ``open(path, encoding="utf-8")`` for text files, or
+    ``open(path, "rb")`` if you genuinely need binary I/O.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C14"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        for m in _OPEN_CALL_RE.finditer(text):
+            call_body = _extract_call_body(text, m.start())
+            if call_body == "()":
+                continue  # empty parens → match inside a string literal
+            if "encoding=" in call_body:
+                continue
+            if any(bm in call_body for bm in _BINARY_MODES):
+                continue
+            lineno = text[: m.start()].count("\n") + 1
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
+    return DetectorResult(count=count, samples=samples)

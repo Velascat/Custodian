@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12
+from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14
 from custodian.audit_kit.detector import AuditContext
 
 
@@ -294,3 +294,64 @@ def test_c12_skips_type_ignore_with_code(tmp_path):
 def test_c12_skips_type_ignore_with_multiple_codes(tmp_path):
     ctx = _ctx(tmp_path, "x = foo()  # type: ignore[attr-defined, return-value]\n")
     assert detect_c12(ctx).count == 0
+
+
+# ── C13: assert in production source ─────────────────────────────────────────
+
+def test_c13_flags_assert_in_src(tmp_path):
+    ctx = _ctx(tmp_path, """\
+def validate(x):
+    assert x is not None
+""")
+    assert detect_c13(ctx).count == 1
+
+
+def test_c13_flags_multiple_asserts(tmp_path):
+    ctx = _ctx(tmp_path, """\
+def validate(x, y):
+    assert x is not None
+    assert isinstance(y, int)
+""")
+    assert detect_c13(ctx).count == 2
+
+
+def test_c13_ignores_top_level_assert(tmp_path):
+    ctx = _ctx(tmp_path, "assert __name__ == '__main__'\n")
+    assert detect_c13(ctx).count == 0
+
+
+# ── C14: open() without encoding ─────────────────────────────────────────────
+
+def test_c14_flags_open_without_encoding(tmp_path):
+    ctx = _ctx(tmp_path, 'with open("file.txt") as f:\n    data = f.read()\n')
+    assert detect_c14(ctx).count == 1
+
+
+def test_c14_flags_open_with_mode_no_encoding(tmp_path):
+    ctx = _ctx(tmp_path, 'with open("file.txt", "r") as f:\n    data = f.read()\n')
+    assert detect_c14(ctx).count == 1
+
+
+def test_c14_skips_open_with_encoding(tmp_path):
+    ctx = _ctx(tmp_path, 'with open("file.txt", encoding="utf-8") as f:\n    data = f.read()\n')
+    assert detect_c14(ctx).count == 0
+
+
+def test_c14_skips_binary_mode(tmp_path):
+    ctx = _ctx(tmp_path, 'with open("file.bin", "rb") as f:\n    data = f.read()\n')
+    assert detect_c14(ctx).count == 0
+
+
+def test_c14_skips_write_binary_mode(tmp_path):
+    ctx = _ctx(tmp_path, 'with open("out.bin", "wb") as f:\n    f.write(b"data")\n')
+    assert detect_c14(ctx).count == 0
+
+
+def test_c14_skips_method_open(tmp_path):
+    ctx = _ctx(tmp_path, 'path.open("r")\n')
+    assert detect_c14(ctx).count == 0
+
+
+def test_c14_skips_string_literal_mention(tmp_path):
+    ctx = _ctx(tmp_path, 'msg = "call open() with encoding"\n')
+    assert detect_c14(ctx).count == 0
