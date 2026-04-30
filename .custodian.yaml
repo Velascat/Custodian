@@ -5,3 +5,21 @@ tests_root: tests
 # Custodian audits itself with its own generic C1-C8 baseline. Eating
 # our own dog food: if a pattern is bad enough to flag in consumer
 # repos, it should be flagged here too.
+
+audit:
+  # C1/C6: code_health.py contains "TODO" and "FIXME" as regex string literals
+  # inside the detector patterns — not actual debt markers.
+  # C2: audit.py is a CLI entrypoint that legitimately writes to stdout.
+  # C7: test_code_health_detectors.py has `assert True` as the test fixture
+  #     for C7 itself, and sample_consumer/tests/ is the test fixture repo.
+  exclude_paths:
+    C1:
+      - src/custodian/audit_kit/code_health.py
+    C6:
+      - src/custodian/audit_kit/code_health.py
+    C2:
+      - src/custodian/cli/audit.py
+      - src/custodian/cli/doctor.py
+    C7:
+      - tests/test_code_health_detectors.py
+      - tests/fixtures/**
