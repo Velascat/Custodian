@@ -7,15 +7,20 @@ import sys
 from pathlib import Path
 
 from custodian.audit_kit.code_health import build_code_health_detectors
+from custodian.audit_kit.detectors.structure import build_structure_detectors
+from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.cli import colors
 from custodian.cli.runner import load_config
 from custodian.plugins.loader import load_detectors, load_plugins
 
 _KNOWN_TOP_LEVEL_KEYS = frozenset({
-    "repo_key", "src_root", "tests_root", "plugins", "detectors", "audit",
+    "repo_key", "src_root", "tests_root", "plugins", "detectors", "audit", "architecture",
+    "maintenance",
 })
 _KNOWN_AUDIT_KEYS = frozenset({
     "exclude_paths", "stale_handlers", "common_words",
+    # plugin-extension keys (plugins may declare arbitrary audit sub-keys)
+    "plugin_audit_keys",
 })
 
 
@@ -48,8 +53,9 @@ def _check_config(config: dict, repo: Path, warnings: list[str]) -> list:
         warnings.append("'audit' must be a mapping, not a scalar")
         audit_cfg = {}
 
+    plugin_audit_keys = frozenset(audit_cfg.get("plugin_audit_keys") or [])
     for key in audit_cfg:
-        if key not in _KNOWN_AUDIT_KEYS:
+        if key not in _KNOWN_AUDIT_KEYS and key not in plugin_audit_keys:
             warnings.append(f"unknown audit key {key!r} (typo?)")
 
     # exclude_paths must be a mapping of lists
@@ -67,6 +73,35 @@ def _check_config(config: dict, repo: Path, warnings: list[str]) -> list:
     stale = audit_cfg.get("stale_handlers")
     if stale is not None and not isinstance(stale, list):
         warnings.append(f"audit.stale_handlers must be a list, got {type(stale).__name__}")
+
+    # architecture.layers validation
+    arch = config.get("architecture")
+    if arch is not None:
+        if not isinstance(arch, dict):
+            warnings.append("'architecture' must be a mapping")
+        else:
+            layers = arch.get("layers")
+            if layers is not None:
+                if not isinstance(layers, list):
+                    warnings.append("architecture.layers must be a list")
+                else:
+                    for i, layer in enumerate(layers):
+                        if not isinstance(layer, dict):
+                            warnings.append(f"architecture.layers[{i}] must be a mapping")
+                            continue
+                        for req in ("name", "glob"):
+                            if req not in layer:
+                                warnings.append(
+                                    f"architecture.layers[{i}] missing required key {req!r}"
+                                )
+                        may_not = layer.get("may_not_import")
+                        if may_not is not None and not isinstance(may_not, (list, str)):
+                            warnings.append(
+                                f"architecture.layers[{i}].may_not_import must be a list or string"
+                            )
+            for key in arch:
+                if key not in ("layers",):
+                    warnings.append(f"unknown architecture key {key!r} (typo?)")
 
     return []
 
@@ -106,7 +141,10 @@ def main():
     finally:
         sys.path.remove(str(args.repo))
 
-    known_ids = {d.id for d in build_code_health_detectors() + extra}
+    known_ids = {d.id for d in (build_code_health_detectors()
+                                + build_structure_detectors()
+                                + build_stub_detectors()
+                                + extra)}
     exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
     if isinstance(exclude_paths, dict):
         for det_id in exclude_paths:
