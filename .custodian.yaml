@@ -38,3 +38,7 @@ audit:
       # code_health.py uses logger.info(f"...") as an example in the C15
       # docstring — not an actual logger call.
       - src/custodian/audit_kit/code_health.py
+    C16:
+      # code_health.py mentions Path.read_text() and Path.write_text() in the
+      # C16 docstring — not actual pathlib calls.
+      - src/custodian/audit_kit/code_health.py

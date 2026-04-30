@@ -130,6 +130,7 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C13", "assert used for runtime validation in src",       "open",     detect_c13,  MEDIUM),
         Detector("C14", "open() call missing explicit encoding=",          "open",     detect_c14,  MEDIUM),
         Detector("C15", "f-string passed directly to logger call",         "open",     detect_c15,  LOW),
+        Detector("C16", "Path.read_text/write_text without encoding=",     "open",     detect_c16,  LOW),
     ]
 
 
@@ -410,3 +411,37 @@ def detect_c15(context: AuditContext) -> DetectorResult:
     message calls).
     """
     return _count_pattern(_py_files(context, "C15"), _FSTRING_LOGGER_RE)
+
+
+_PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
+
+
+def detect_c16(context: AuditContext) -> DetectorResult:
+    """Flag ``Path.read_text()`` and ``Path.write_text()`` calls missing ``encoding=``.
+
+    Without ``encoding=``, pathlib text methods use the platform locale
+    encoding (typically UTF-8 on Linux, CP1252 on Windows), making file
+    I/O non-portable.  Always specify ``encoding="utf-8"`` (or ``"ascii"``
+    for known-ASCII files like ``/proc`` pseudo-files).
+
+    Binary-mode equivalents (``read_bytes``, ``write_bytes``) are not
+    flagged — they never need an encoding argument.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C16"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        lines = text.splitlines()
+        for m in _PATHLIB_TEXT_RE.finditer(text):
+            call_body = _extract_call_body(text, m.start())
+            if "encoding=" in call_body:
+                continue
+            lineno = text[: m.start()].count("\n") + 1
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
+    return DetectorResult(count=count, samples=samples)
