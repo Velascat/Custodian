@@ -66,6 +66,8 @@ def main():
                         help="Emit JSON array, one object per repo")
     parser.add_argument("--fail-on-findings", action="store_true",
                         help="Exit 1 if any repo has findings")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="After the table, print per-repo finding details for repos with findings")
     args = parser.parse_args()
 
     if args.repos_file:
@@ -104,6 +106,8 @@ def main():
         print(json.dumps(out, indent=2))
     else:
         _print_table(results)
+        if args.verbose:
+            _print_verbose(results)
 
     any_findings = any(
         r.total_findings > 0
@@ -135,6 +139,29 @@ def _print_table(results: list) -> None:
         print(
             f"{name:<{col_repo}} | {result.total_findings:>8} | {h:>4} | {m:>4} | {l:>4} | {status}"
         )
+
+
+def _print_verbose(results: list) -> None:
+    """Print per-finding details for repos that have findings."""
+    noisy = [(repo, result, err) for repo, result, err in results
+             if err or (result and result.total_findings > 0)]
+    if not noisy:
+        return
+    print()
+    for repo, result, err in noisy:
+        name = result.repo_key if result else str(repo)
+        print(f"── {name} {'─' * max(0, 60 - len(name))}")
+        if err:
+            print(f"  ERROR: {err}")
+            continue
+        for code, pat in result.patterns.items():
+            if pat.get("count", 0) == 0:
+                continue
+            sev = _SEV_LABEL.get(pat.get("severity"), "    ").strip()
+            print(f"  [{sev}] [{code}] {pat['description']} — {pat['count']} finding(s)")
+            for sample in pat.get("samples", [])[:5]:
+                print(f"        {sample}")
+        print()
 
 
 if __name__ == "__main__":
