@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14
+from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14, detect_c15
 from custodian.audit_kit.detector import AuditContext
 
 
@@ -355,3 +355,25 @@ def test_c14_skips_method_open(tmp_path):
 def test_c14_skips_string_literal_mention(tmp_path):
     ctx = _ctx(tmp_path, 'msg = "call open() with encoding"\n')
     assert detect_c14(ctx).count == 0
+
+
+# ── C15: f-string passed to logger ───────────────────────────────────────────
+
+def test_c15_flags_fstring_logger_info(tmp_path):
+    ctx = _ctx(tmp_path, 'import logging\nlogger = logging.getLogger(__name__)\nlogger.info(f"value={x}")\n')
+    assert detect_c15(ctx).count == 1
+
+
+def test_c15_flags_underscore_logger(tmp_path):
+    ctx = _ctx(tmp_path, 'import logging\n_logger = logging.getLogger(__name__)\n_logger.error(f"bad: {msg}")\n')
+    assert detect_c15(ctx).count == 1
+
+
+def test_c15_skips_lazy_format(tmp_path):
+    ctx = _ctx(tmp_path, 'import logging\nlogger = logging.getLogger(__name__)\nlogger.info("value=%s", x)\n')
+    assert detect_c15(ctx).count == 0
+
+
+def test_c15_skips_plain_string(tmp_path):
+    ctx = _ctx(tmp_path, 'import logging\nlogger = logging.getLogger(__name__)\nlogger.warning("static message")\n')
+    assert detect_c15(ctx).count == 0

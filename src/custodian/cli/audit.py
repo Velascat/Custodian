@@ -12,15 +12,22 @@ _SEVERITY_LABELS = {"high": "HIGH", "medium": "MED ", "low": "LOW "}
 
 
 def _human_summary(result) -> str:
-    lines = [
-        f"Custodian audit — repo: {result.repo_key or '(unset)'}",
-        f"  patterns: {len(result.patterns)}",
-        f"  findings: {result.total_findings}",
-    ]
     noisy = {
         code: pat for code, pat in result.patterns.items()
         if pat.get("count", 0) > 0
     }
+    sev_counts: dict[str, int] = {"high": 0, "medium": 0, "low": 0}
+    for pat in noisy.values():
+        sev = pat.get("severity", "medium")
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+
+    lines = [
+        f"Custodian audit — repo: {result.repo_key or '(unset)'}",
+        f"  patterns: {len(result.patterns)}",
+        f"  findings: {result.total_findings}"
+        + (f"  (HIGH={sev_counts['high']} MED={sev_counts['medium']} LOW={sev_counts['low']})"
+           if result.total_findings > 0 else ""),
+    ]
     if noisy:
         lines.append("")
         for code, pat in noisy.items():

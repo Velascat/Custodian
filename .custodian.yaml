@@ -34,3 +34,7 @@ audit:
       # no logger infrastructure is needed in CLI entry points.
       - src/custodian/cli/doctor.py
       - src/custodian/cli/multi.py
+    C15:
+      # code_health.py uses logger.info(f"...") as an example in the C15
+      # docstring — not an actual logger call.
+      - src/custodian/audit_kit/code_health.py

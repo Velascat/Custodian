@@ -126,6 +126,7 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C12", "bare # type: ignore without error code",          "open",     detect_c12,  LOW),
         Detector("C13", "assert used for runtime validation in src",       "open",     detect_c13,  MEDIUM),
         Detector("C14", "open() call missing explicit encoding=",          "open",     detect_c14,  MEDIUM),
+        Detector("C15", "f-string passed directly to logger call",         "open",     detect_c15,  LOW),
     ]
 
 
@@ -386,3 +387,23 @@ def detect_c14(context: AuditContext) -> DetectorResult:
                 rel = path.relative_to(context.repo_root)
                 samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
     return DetectorResult(count=count, samples=samples)
+
+
+_FSTRING_LOGGER_RE = re.compile(
+    r"\b(?:logger|_logger|log)\s*\.\s*"
+    r"(?:debug|info|warning|error|critical|exception)\s*\(\s*f[\"']"
+)
+
+
+def detect_c15(context: AuditContext) -> DetectorResult:
+    """Flag f-strings passed directly as the first argument to a logger call.
+
+    ``logger.info(f"value={x}")`` evaluates the f-string unconditionally,
+    even when the INFO level is disabled and the message would never be
+    emitted.  Prefer lazy formatting: ``logger.info("value=%s", x)``.
+
+    Matches ``logger``, ``_logger``, and ``log`` as common logger variable
+    names; ``logging.getLogger()`` calls are not matched (they're not
+    message calls).
+    """
+    return _count_pattern(_py_files(context, "C15"), _FSTRING_LOGGER_RE)
