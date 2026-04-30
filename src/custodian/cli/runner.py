@@ -23,13 +23,18 @@ def run_repo_audit(
     repo_root: Path,
     *,
     only: set[str] | None = None,
+    min_severity: str | None = None,
 ) -> AuditResult:
     """Drive one repo through the audit pipeline.
 
     Args:
-        repo_root: Repository root containing ``.custodian.yaml``.
-        only: Optional set of detector IDs (e.g. ``{"C1", "OC7"}``) to run.
-              All other detectors are skipped.  ``None`` runs everything.
+        repo_root:    Repository root containing ``.custodian.yaml``.
+        only:         Optional set of detector IDs to run (e.g. ``{"C1", "OC7"}``).
+                      All other detectors are skipped.  ``None`` runs everything.
+        min_severity: If set, skip detectors whose severity is below this level.
+                      Accepted values: ``"high"``, ``"medium"``, ``"low"``.
+                      ``"high"`` runs only HIGH detectors; ``"medium"`` runs HIGH
+                      and MEDIUM; ``"low"`` (the default) runs all.
 
     Returns AuditResult so callers can decide on JSON, human, or aggregator
     output formatting.
@@ -56,4 +61,4 @@ def run_repo_audit(
         config=config,
         plugin_modules=plugins,
     )
-    return run_audit(context=context, detectors=detectors)
+    return run_audit(context=context, detectors=detectors, min_severity=min_severity)

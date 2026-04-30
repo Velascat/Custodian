@@ -8,6 +8,8 @@ from pathlib import Path
 
 from custodian.cli.runner import run_repo_audit
 
+_SEVERITY_LABELS = {"high": "HIGH", "medium": "MED ", "low": "LOW "}
+
 
 def _human_summary(result) -> str:
     lines = [
@@ -22,19 +24,23 @@ def _human_summary(result) -> str:
     if noisy:
         lines.append("")
         for code, pat in noisy.items():
-            lines.append(f"  [{code}] {pat['description']} — {pat['count']} finding(s)")
+            sev = _SEVERITY_LABELS.get(pat.get("severity", "medium"), "MED ")
+            lines.append(
+                f"  [{sev}] [{code}] {pat['description']} — {pat['count']} finding(s)"
+            )
             for sample in pat.get("samples", [])[:3]:
-                lines.append(f"      {sample}")
+                lines.append(f"        {sample}")
     return "\n".join(lines)
 
 
 def main():
     """
-    custodian-audit                         → cwd, default config (human + JSON)
-    custodian-audit --repo /path/to/repo    → that repo
-    custodian-audit --json                  → JSON only (machine-readable)
-    custodian-audit --only C1,OC7          → run only those detector IDs
-    custodian-audit --fail-on-findings      → exit 1 if any findings
+    custodian-audit                           → cwd, default config (human + JSON)
+    custodian-audit --repo /path/to/repo      → that repo
+    custodian-audit --json                    → JSON only (machine-readable)
+    custodian-audit --only C1,OC7            → run only those detector IDs
+    custodian-audit --min-severity high       → run only HIGH-severity detectors
+    custodian-audit --fail-on-findings        → exit 1 if any findings
     """
     parser = argparse.ArgumentParser(description="Run a Custodian audit on a repo")
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
@@ -44,6 +50,9 @@ def main():
     parser.add_argument("--only", metavar="CODES",
                         help="Comma-separated detector IDs to run (e.g. C1,OC7). "
                              "All others are skipped.")
+    parser.add_argument("--min-severity", metavar="LEVEL", choices=["high", "medium", "low"],
+                        help="Only run detectors at this severity or higher "
+                             "(high > medium > low). Default: low (run all).")
     parser.add_argument("--fail-on-findings", action="store_true",
                         help="Exit with code 1 if any findings are present")
     args = parser.parse_args()
@@ -52,7 +61,7 @@ def main():
     if args.only:
         only = {c.strip() for c in args.only.split(",") if c.strip()}
 
-    result = run_repo_audit(args.repo, only=only)
+    result = run_repo_audit(args.repo, only=only, min_severity=args.min_severity)
 
     if args.json:
         print(result.to_json())

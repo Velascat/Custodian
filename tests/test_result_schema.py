@@ -25,6 +25,15 @@ def test_findings_list_empty_when_no_samples():
     assert result.findings() == []
 
 
+def test_findings_skips_patterns_with_count_zero_even_if_samples_present():
+    # Some detectors add informational messages to samples when count=0
+    result = AuditResult(
+        patterns={"AI1": {"count": 0, "samples": ["# module not importable"]}},
+        total_findings=0,
+    )
+    assert result.findings() == []
+
+
 def test_findings_list_contains_code_and_sample():
     result = AuditResult(
         patterns={

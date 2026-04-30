@@ -23,3 +23,8 @@ audit:
     C7:
       - tests/test_code_health_detectors.py
       - tests/fixtures/**
+    C9:
+      # doctor.py is a diagnostic CLI — it catches plugin/detector load errors
+      # and reports them as human-readable warnings. The exception message IS
+      # captured (appended to the warnings list); no logger call is needed.
+      - src/custodian/cli/doctor.py

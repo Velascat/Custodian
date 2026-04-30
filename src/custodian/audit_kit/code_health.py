@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-from custodian.audit_kit.detector import AuditContext, Detector, DetectorResult
+from custodian.audit_kit.detector import AuditContext, Detector, DetectorResult, HIGH, MEDIUM, LOW
 
 
 def _glob_to_regex(glob: str) -> re.Pattern[str]:
@@ -109,14 +109,15 @@ def _count_pattern(paths: list[Path], pattern: re.Pattern[str]) -> DetectorResul
 
 def build_code_health_detectors() -> list[Detector]:
     return [
-        Detector("C1", "TODO markers in source", "open", detect_c1),
-        Detector("C2", "print statements in source", "open", detect_c2),
-        Detector("C3", "bare except usage", "open", detect_c3),
-        Detector("C4", "pass statements in exception handlers", "partial", detect_c4),
-        Detector("C5", "debugger breakpoints", "open", detect_c5),
-        Detector("C6", "FIXME markers", "open", detect_c6),
-        Detector("C7", "assert True usage", "deferred", detect_c7),
-        Detector("C8", "stale handler references", "partial", detect_c8),
+        Detector("C1", "TODO markers in source",                          "open",     detect_c1,  LOW),
+        Detector("C2", "print statements in source",                      "open",     detect_c2,  MEDIUM),
+        Detector("C3", "bare except usage",                               "open",     detect_c3,  HIGH),
+        Detector("C4", "pass statements in exception handlers",           "partial",  detect_c4,  MEDIUM),
+        Detector("C5", "debugger breakpoints",                            "open",     detect_c5,  HIGH),
+        Detector("C6", "FIXME markers",                                   "open",     detect_c6,  LOW),
+        Detector("C7", "assert True usage",                               "deferred", detect_c7,  LOW),
+        Detector("C8", "stale handler references",                        "partial",  detect_c8,  MEDIUM),
+        Detector("C9", "broad except Exception without a logger call",    "open",     detect_c9,  HIGH),
     ]
 
 
@@ -167,4 +168,65 @@ def detect_c8(context: AuditContext) -> DetectorResult:
                 count += 1
                 if len(samples) < 5:
                     samples.append(f"{path}:{handler}")
+    return DetectorResult(count=count, samples=samples)
+
+
+_BROAD_EXCEPT_RE = re.compile(
+    r"^\s+except\s+(?:Exception|BaseException)\s*(?:as\s+\w+)?\s*:",
+    re.MULTILINE,
+)
+_LOGGER_CALL_RE = re.compile(r"\blogger\s*\.\s*\w+\s*\(|logging\s*\.\s*\w+\s*\(")
+_RAISE_RE = re.compile(r"^\s+raise\b", re.MULTILINE)
+
+
+def _extract_block(lines: list[str], except_lineno: int) -> str:
+    """Return the body of an except-handler (lines after the handler header).
+
+    Stops at the first non-blank line whose indentation is <= the handler line.
+    ``except_lineno`` is 1-based.
+    """
+    except_indent = len(lines[except_lineno - 1]) - len(lines[except_lineno - 1].lstrip())
+    block_lines: list[str] = []
+    for line in lines[except_lineno:]:  # body lines of the handler
+        stripped = line.lstrip()
+        if not stripped:
+            block_lines.append(line)
+            continue
+        if len(line) - len(stripped) <= except_indent:
+            break  # dedented — block ended
+        block_lines.append(line)
+    return "\n".join(block_lines)
+
+
+def detect_c9(context: AuditContext) -> DetectorResult:
+    """Flag ``except Exception:`` blocks that contain no logger or logging call.
+
+    A broad exception catch without any log entry is the pattern most likely
+    to silently hide real errors in production. Narrow catches (OSError,
+    ValueError, etc.) are excluded — those are presumed intentional and
+    specific.
+
+    False-positive reduction:
+    - Blocks containing a ``logger.`` / ``logging.`` call are skipped (already logged).
+    - Blocks containing a ``raise`` statement are skipped (exception propagates; not silenced).
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C9"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        for m in _BROAD_EXCEPT_RE.finditer(text):
+            lineno = text[: m.start()].count("\n") + 1
+            block_text = _extract_block(lines, lineno)
+            if _LOGGER_CALL_RE.search(block_text):
+                continue  # has logging — acceptable
+            if _RAISE_RE.search(block_text):
+                continue  # re-raises — not silenced
+            count += 1
+            if len(samples) < 8:
+                rel = path.relative_to(context.repo_root)
+                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
     return DetectorResult(count=count, samples=samples)

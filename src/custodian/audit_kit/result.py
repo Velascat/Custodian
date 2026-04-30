@@ -20,11 +20,15 @@ class AuditResult:
     def findings(self) -> list[dict]:
         """Flat list of {code, sample} for every sample across all patterns.
 
-        Patterns with zero findings contribute no entries. Preserves detector
-        order so consumers can group by code without sorting.
+        Only includes patterns where ``count > 0`` — some detectors add
+        informational messages to ``samples`` even when they found nothing
+        (e.g. "module not importable"). Preserves detector order so consumers
+        can group by code without sorting.
         """
         out: list[dict] = []
         for code, pat in self.patterns.items():
+            if pat.get("count", 0) == 0:
+                continue
             for sample in pat.get("samples", []):
                 out.append({"code": code, "sample": sample})
         return out
