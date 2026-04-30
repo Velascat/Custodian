@@ -21,6 +21,7 @@ dev = [
 [project.scripts]
 custodian-audit = "custodian.cli.audit:main"
 custodian-doctor = "custodian.cli.doctor:main"
+custodian-multi = "custodian.cli.multi:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

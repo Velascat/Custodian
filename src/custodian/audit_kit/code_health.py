@@ -95,6 +95,9 @@ def _py_files(context: AuditContext, detector_id: str | None = None) -> list[Pat
     return kept
 
 
+_MAX_SAMPLES = 8
+
+
 def _count_pattern(paths: list[Path], pattern: re.Pattern[str]) -> DetectorResult:
     samples: list[str] = []
     count = 0
@@ -102,7 +105,7 @@ def _count_pattern(paths: list[Path], pattern: re.Pattern[str]) -> DetectorResul
         text = path.read_text(encoding="utf-8")
         for match in pattern.finditer(text):
             count += 1
-            if len(samples) < 5:
+            if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{path}:{match.group(0)[:60]}")
     return DetectorResult(count=count, samples=samples)
 
@@ -166,7 +169,7 @@ def detect_c8(context: AuditContext) -> DetectorResult:
         for handler in stale_handlers:
             if handler in text and handler not in common_words:
                 count += 1
-                if len(samples) < 5:
+                if len(samples) < _MAX_SAMPLES:
                     samples.append(f"{path}:{handler}")
     return DetectorResult(count=count, samples=samples)
 
@@ -226,7 +229,7 @@ def detect_c9(context: AuditContext) -> DetectorResult:
             if _RAISE_RE.search(block_text):
                 continue  # re-raises — not silenced
             count += 1
-            if len(samples) < 8:
+            if len(samples) < _MAX_SAMPLES:
                 rel = path.relative_to(context.repo_root)
                 samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
     return DetectorResult(count=count, samples=samples)
