@@ -19,10 +19,20 @@ def load_config(repo_root: Path) -> dict:
         return yaml.safe_load(handle) or {}
 
 
-def run_repo_audit(repo_root: Path) -> AuditResult:
-    """
-    Drive one repo through the audit pipeline. Returns AuditResult so callers
-    can decide on JSON, human, or aggregator output formatting.
+def run_repo_audit(
+    repo_root: Path,
+    *,
+    only: set[str] | None = None,
+) -> AuditResult:
+    """Drive one repo through the audit pipeline.
+
+    Args:
+        repo_root: Repository root containing ``.custodian.yaml``.
+        only: Optional set of detector IDs (e.g. ``{"C1", "OC7"}``) to run.
+              All other detectors are skipped.  ``None`` runs everything.
+
+    Returns AuditResult so callers can decide on JSON, human, or aggregator
+    output formatting.
     """
     config = load_config(repo_root)
     sys.path.insert(0, str(repo_root))
@@ -35,6 +45,9 @@ def run_repo_audit(repo_root: Path) -> AuditResult:
     src_root   = repo_root / config.get("src_root", "src")
     tests_root = repo_root / config.get("tests_root", "tests")
     detectors  = build_code_health_detectors() + extra
+
+    if only:
+        detectors = [d for d in detectors if d.id in only]
 
     context = AuditContext(
         repo_root=repo_root,

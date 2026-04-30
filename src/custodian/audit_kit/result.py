@@ -17,6 +17,26 @@ class AuditResult:
     patterns: dict = field(default_factory=dict)
     total_findings: int = 0
 
+    def findings(self) -> list[dict]:
+        """Flat list of {code, sample} for every sample across all patterns.
+
+        Patterns with zero findings contribute no entries. Preserves detector
+        order so consumers can group by code without sorting.
+        """
+        out: list[dict] = []
+        for code, pat in self.patterns.items():
+            for sample in pat.get("samples", []):
+                out.append({"code": code, "sample": sample})
+        return out
+
     def to_json(self) -> str:
-        """Emit stable, explicit JSON for downstream aggregation later."""
-        return json.dumps(asdict(self), indent=2, sort_keys=True)
+        """Emit stable, explicit JSON for downstream aggregation.
+
+        Includes a top-level ``findings`` list — a flat enumeration of every
+        sample across all patterns — so callers can do ``data["findings"]``
+        without iterating ``patterns``.  The ``patterns`` dict is still
+        present for backwards compatibility.
+        """
+        d = asdict(self)
+        d["findings"] = self.findings()
+        return json.dumps(d, indent=2, sort_keys=True)

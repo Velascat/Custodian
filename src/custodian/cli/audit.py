@@ -3,41 +3,66 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from custodian.cli.runner import run_repo_audit
 
 
 def _human_summary(result) -> str:
-    by_status: dict[str, int] = {}
-    for pat in result.patterns.values():
-        by_status[pat["status"]] = by_status.get(pat["status"], 0) + pat["count"]
-    parts = ", ".join(f"{count} {status}" for status, count in sorted(by_status.items()))
-    return (
-        f"Custodian audit — repo: {result.repo_key or '(unset)'}\n"
-        f"  patterns: {len(result.patterns)}\n"
-        f"  findings: {result.total_findings}"
-        + (f"  ({parts})" if parts else "")
-    )
+    lines = [
+        f"Custodian audit — repo: {result.repo_key or '(unset)'}",
+        f"  patterns: {len(result.patterns)}",
+        f"  findings: {result.total_findings}",
+    ]
+    noisy = {
+        code: pat for code, pat in result.patterns.items()
+        if pat.get("count", 0) > 0
+    }
+    if noisy:
+        lines.append("")
+        for code, pat in noisy.items():
+            lines.append(f"  [{code}] {pat['description']} — {pat['count']} finding(s)")
+            for sample in pat.get("samples", [])[:3]:
+                lines.append(f"      {sample}")
+    return "\n".join(lines)
 
 
 def main():
     """
-    custodian-audit                       → cwd, default config (human + JSON)
-    custodian-audit --repo /path/to/repo  → that repo
-    custodian-audit --json                 → emit JSON only (machine-readable)
+    custodian-audit                         → cwd, default config (human + JSON)
+    custodian-audit --repo /path/to/repo    → that repo
+    custodian-audit --json                  → JSON only (machine-readable)
+    custodian-audit --only C1,OC7          → run only those detector IDs
+    custodian-audit --fail-on-findings      → exit 1 if any findings
     """
     parser = argparse.ArgumentParser(description="Run a Custodian audit on a repo")
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
                         help="Repository root containing .custodian.yaml (default: cwd)")
     parser.add_argument("--json", action="store_true",
                         help="Emit JSON only, no human summary header")
+    parser.add_argument("--only", metavar="CODES",
+                        help="Comma-separated detector IDs to run (e.g. C1,OC7). "
+                             "All others are skipped.")
+    parser.add_argument("--fail-on-findings", action="store_true",
+                        help="Exit with code 1 if any findings are present")
     args = parser.parse_args()
 
-    result = run_repo_audit(args.repo)
+    only: set[str] | None = None
+    if args.only:
+        only = {c.strip() for c in args.only.split(",") if c.strip()}
+
+    result = run_repo_audit(args.repo, only=only)
 
     if args.json:
         print(result.to_json())
     else:
         print(_human_summary(result))
         print(result.to_json())
+
+    if args.fail_on_findings and result.total_findings > 0:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
