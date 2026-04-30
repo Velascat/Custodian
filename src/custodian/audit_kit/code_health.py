@@ -122,6 +122,7 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C8",  "stale handler references",                        "partial",  detect_c8,   MEDIUM),
         Detector("C9",  "broad except Exception without a logger call",    "open",     detect_c9,   HIGH),
         Detector("C10", "naive datetime.now() / utcnow() usage",           "open",     detect_c10,  MEDIUM),
+        Detector("C11", "subprocess call without timeout",                 "open",     detect_c11,  MEDIUM),
     ]
 
 
@@ -229,6 +230,64 @@ def detect_c9(context: AuditContext) -> DetectorResult:
                 continue  # has logging — acceptable
             if _RAISE_RE.search(block_text):
                 continue  # re-raises — not silenced
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
+    return DetectorResult(count=count, samples=samples)
+
+
+_SUBPROCESS_CALL_RE = re.compile(
+    r"\bsubprocess\.(run|call|check_output|check_call)\s*\("
+)
+
+
+def _extract_call_body(text: str, start: int) -> str:
+    """Return the full text of a function call starting at ``start``.
+
+    ``start`` should point to the opening ``(`` or the function name.
+    Tracks parenthesis depth to find the closing ``)``; does not handle
+    string literals containing unmatched parens (good enough for subprocess).
+    """
+    depth = 0
+    i = text.find("(", start)
+    if i == -1:
+        return ""
+    for j, ch in enumerate(text[i:], i):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[i : j + 1]
+    return text[i:]
+
+
+def detect_c11(context: AuditContext) -> DetectorResult:
+    """Flag ``subprocess.run/call/check_output/check_call`` calls without ``timeout=``.
+
+    A subprocess without a timeout can hang indefinitely, blocking the
+    calling process (and any polling worker that owns it).  Short-lived
+    tool calls (git, ruff, etc.) should specify a conservative timeout;
+    long-running agent invocations may legitimately omit one and should
+    be excluded via ``audit.exclude_paths.C11`` in ``.custodian.yaml``.
+
+    Detection extracts the full call body by tracking parenthesis depth,
+    so multi-line calls are handled correctly.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C11"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        for m in _SUBPROCESS_CALL_RE.finditer(text):
+            call_body = _extract_call_body(text, m.start())
+            if "timeout" in call_body:
+                continue
+            lineno = text[: m.start()].count("\n") + 1
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 rel = path.relative_to(context.repo_root)
