@@ -102,7 +102,10 @@ def _count_pattern(paths: list[Path], pattern: re.Pattern[str]) -> DetectorResul
     samples: list[str] = []
     count = 0
     for path in paths:
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
         for match in pattern.finditer(text):
             count += 1
             if len(samples) < _MAX_SAMPLES:

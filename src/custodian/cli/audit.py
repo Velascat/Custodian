@@ -40,6 +40,25 @@ def _human_summary(result) -> str:
     return "\n".join(lines)
 
 
+def _list_detectors(repo: Path) -> None:
+    from custodian.cli.runner import load_config
+    from custodian.audit_kit.code_health import build_code_health_detectors
+    from custodian.plugins.loader import load_detectors, load_plugins
+    config = load_config(repo)
+    sys.path.insert(0, str(repo))
+    try:
+        load_plugins(config)
+        extra = load_detectors(config)
+    finally:
+        sys.path.remove(str(repo))
+    detectors = build_code_health_detectors() + extra
+    print(f"{'ID':<6} {'SEV':<6} {'STATUS':<10} DESCRIPTION")
+    print(f"{'-'*6} {'-'*6} {'-'*10} {'-'*40}")
+    for d in detectors:
+        sev = _SEVERITY_LABELS.get(d.severity, "MED ").strip()
+        print(f"{d.id:<6} {sev:<6} {d.status:<10} {d.description}")
+
+
 def main():
     """
     custodian-audit                           → cwd, default config (human + JSON)
@@ -48,6 +67,7 @@ def main():
     custodian-audit --only C1,OC7            → run only those detector IDs
     custodian-audit --min-severity high       → run only HIGH-severity detectors
     custodian-audit --fail-on-findings        → exit 1 if any findings
+    custodian-audit --list-detectors          → list all available detector IDs
     """
     parser = argparse.ArgumentParser(description="Run a Custodian audit on a repo")
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
@@ -64,7 +84,13 @@ def main():
                         help="Exit with code 1 if any findings are present")
     parser.add_argument("--no-json", action="store_true",
                         help="Suppress JSON block; print human summary only")
+    parser.add_argument("--list-detectors", action="store_true",
+                        help="Print all available detector IDs and descriptions, then exit")
     args = parser.parse_args()
+
+    if args.list_detectors:
+        _list_detectors(args.repo)
+        return
 
     only: set[str] | None = None
     if args.only:
