@@ -39,3 +39,7 @@ See `tests/fixtures/sample_consumer/.custodian.yaml` for a concrete example.
 ## Versioning and schema stability
 
 Custodian follows semantic versioning from day 1. Audit output is explicitly versioned using `schema_version` in `AuditResult`; v0.1 emits `schema_version = 1`.
+
+## License
+
+GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later) — see [LICENSE](LICENSE).
