@@ -378,6 +378,16 @@ class TestA1:
         })
         assert detect_a1(ctx).count == 0
 
+    def test_forbidden_import_prefix_relative_import_not_flagged(self, tmp_path):
+        # "from .videofoundry import X" is a relative import — must NOT match prefix "videofoundry"
+        src = "from .videofoundry import VideoFoundryProfile\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no videofoundry", "glob": "src/**/*.py", "forbidden_import_prefix": "videofoundry"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0
+
 
 class TestDetectS4:
     def _ctx(self, tmp_path: Path, tests_root=None) -> AuditContext:

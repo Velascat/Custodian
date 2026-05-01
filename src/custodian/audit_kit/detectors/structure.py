@@ -191,7 +191,7 @@ def detect_a1(context: AuditContext) -> DetectorResult:
                             if _glob_match(Path(mod_as_path), path_pattern):
                                 mod = alias.name
                                 break
-                    elif isinstance(node, ast.ImportFrom) and node.module:
+                    elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
                         mod_as_path = node.module.replace(".", "/")
                         if _glob_match(Path(mod_as_path), path_pattern):
                             mod = node.module
@@ -217,7 +217,8 @@ def detect_a1(context: AuditContext) -> DetectorResult:
                             if mp == prefix_path or mp.startswith(prefix_path + "/"):
                                 mod = alias.name
                                 break
-                    elif isinstance(node, ast.ImportFrom) and node.module:
+                    elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                        # node.level > 0 means a relative import (from .foo import) — skip
                         mp = node.module.replace(".", "/")
                         if mp == prefix_path or mp.startswith(prefix_path + "/"):
                             mod = node.module
