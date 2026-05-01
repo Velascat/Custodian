@@ -94,6 +94,8 @@ def _collect_usages_only(tree: ast.Module, cg: CallGraph) -> None:
                 cg.called_attrs.add(func.attr)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             cg.accessed_attrs.add(node.attr)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            cg.called_names.add(node.id)
 
 
 def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
@@ -127,7 +129,7 @@ def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
                 elif isinstance(dec, ast.Attribute):
                     cg.decorated_names.add(dec.attr)
 
-    # All call sites and attribute accesses
+    # All call sites, attribute accesses, and bare name references
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             func = node.func
@@ -137,3 +139,5 @@ def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
                 cg.called_attrs.add(func.attr)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             cg.accessed_attrs.add(node.attr)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            cg.called_names.add(node.id)

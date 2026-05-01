@@ -6,6 +6,7 @@ import pytest
 
 from custodian.audit_kit.code_health import (
     build_code_health_detectors,
+    detect_c2,
     detect_c9, detect_c10, detect_c11, detect_c12, detect_c13,
     detect_c14, detect_c15, detect_c16, detect_c17, detect_c18,
     detect_c21, detect_c22, detect_c23, detect_c24, detect_c25,
