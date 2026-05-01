@@ -109,7 +109,8 @@ def _build_analysis_graph(
 
     if "call_graph" in needed:
         from custodian.audit_kit.passes.call_graph import build_call_graph
-        graph.call_graph = build_call_graph(src_root)
+        extra: list[Path] = [tests_root] if tests_root is not None and tests_root.is_dir() else []
+        graph.call_graph = build_call_graph(src_root, extra_roots=extra)
 
     if "symbol_index" in needed:
         from custodian.audit_kit.passes.symbol_index import build_symbol_index

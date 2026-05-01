@@ -51,8 +51,13 @@ class CallGraph:
     framework_decorated: set[str] = field(default_factory=set)
 
 
-def build_call_graph(src_root: Path) -> CallGraph:
-    """Walk every .py file under src_root and build the call-graph."""
+def build_call_graph(src_root: Path, extra_roots: list[Path] | None = None) -> CallGraph:
+    """Walk every .py file under src_root (and extra_roots) and build the call-graph.
+
+    extra_roots are scanned for attribute/call usages only — their definitions
+    are not added to module_functions or framework_decorated so D1/D2 checks
+    remain src-only.
+    """
     cg = CallGraph()
     for path in sorted(src_root.rglob("*.py")):
         if not path.is_file():
@@ -63,7 +68,32 @@ def build_call_graph(src_root: Path) -> CallGraph:
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         _collect_from_module(tree, cg)
+    for extra_root in (extra_roots or []):
+        if not extra_root.is_dir():
+            continue
+        for path in sorted(extra_root.rglob("*.py")):
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+                tree = ast.parse(text, filename=str(path))
+            except (OSError, SyntaxError, UnicodeDecodeError):
+                continue
+            _collect_usages_only(tree, cg)
     return cg
+
+
+def _collect_usages_only(tree: ast.Module, cg: CallGraph) -> None:
+    """Collect only call sites and attribute accesses from extra (test) files."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name):
+                cg.called_names.add(func.id)
+            elif isinstance(func, ast.Attribute):
+                cg.called_attrs.add(func.attr)
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            cg.accessed_attrs.add(node.attr)
 
 
 def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
