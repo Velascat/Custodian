@@ -107,8 +107,15 @@ def detect_d1(context: AuditContext) -> DetectorResult:
 
 # ── F1 ────────────────────────────────────────────────────────────────────────
 
+_SERIALIZATION_METHODS = frozenset({"to_dict", "to_json", "asdict", "model_dump", "dict", "__dict__"})
+
+
 def _dataclass_field_names(src_root: Path) -> set[str]:
-    """Collect all field names defined in @dataclass classes across src_root."""
+    """Collect field names from @dataclass classes that lack serialization methods.
+
+    Dataclasses with to_dict/to_json/model_dump/asdict methods expose all fields
+    indirectly via serialization — we skip those to avoid false positives.
+    """
     fields: set[str] = set()
     for path in sorted(src_root.rglob("*.py")):
         if not path.is_file():
@@ -126,6 +133,14 @@ def _dataclass_field_names(src_root: Path) -> set[str]:
                 or (isinstance(d, ast.Attribute) and d.attr == "dataclass")
                 for d in node.decorator_list
             ):
+                continue
+            # Skip dataclasses that expose fields via serialization methods
+            method_names = {
+                stmt.name
+                for stmt in node.body
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if method_names & _SERIALIZATION_METHODS:
                 continue
             for stmt in node.body:
                 if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
