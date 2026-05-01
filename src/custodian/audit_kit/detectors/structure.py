@@ -130,12 +130,18 @@ def detect_a1(context: AuditContext) -> DetectorResult:
     if not invariants:
         return DetectorResult(count=0, samples=[])
 
+    audit_cfg: dict = context.config.get("audit") or {}
+    a1_excludes: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("A1") or [])
+
     samples: list[str] = []
     count = 0
 
     for path, tree, src in context.graph.ast_forest.items():
         rel = path.relative_to(context.repo_root)
-        rel_str = rel.as_posix()  # noqa: F841 — available for debug if needed
+        rel_posix = rel.as_posix()
+
+        if a1_excludes and any(fnmatch.fnmatch(rel_posix, excl) for excl in a1_excludes):
+            continue
 
         for rule in invariants:
             glob = rule.get("glob") or ""
