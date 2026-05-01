@@ -21,6 +21,7 @@ dev = [
 tools = [
     "mypy>=1.8",
     "vulture>=2.11",
+    "semgrep>=1.0",
     # ty is from Astral (uv install ty); add if using ty adapter
 ]
 

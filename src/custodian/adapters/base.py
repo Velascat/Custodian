@@ -3,11 +3,26 @@
 """ToolAdapter abstract base — all external-tool adapters implement this."""
 from __future__ import annotations
 
+import shutil
+import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
 
 from custodian.core.finding import Finding
+
+
+def find_tool(name: str) -> str | None:
+    """Return the path to a tool binary, checking the current venv first.
+
+    When Custodian runs inside a virtualenv, tools installed in that venv are
+    preferred over system-wide installations so ``shutil.which`` (which only
+    searches PATH) is not sufficient when the venv is not fully activated.
+    """
+    venv_bin = Path(sys.executable).parent / name
+    if venv_bin.exists():
+        return str(venv_bin)
+    return shutil.which(name)
 
 
 class ToolAdapter(ABC):

@@ -23,11 +23,11 @@ class TestSemgrepSeverityMapping:
 
 class TestSemgrepAdapterAvailability:
     def test_available_when_semgrep_found(self):
-        with patch("shutil.which", return_value="/usr/bin/semgrep"):
+        with patch("custodian.adapters.semgrep.find_tool", return_value="/usr/bin/semgrep"):
             assert SemgrepAdapter().is_available() is True
 
     def test_unavailable_when_semgrep_missing(self):
-        with patch("shutil.which", return_value=None):
+        with patch("custodian.adapters.semgrep.find_tool", return_value=None):
             assert SemgrepAdapter().is_available() is False
 
 

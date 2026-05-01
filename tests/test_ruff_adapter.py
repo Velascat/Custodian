@@ -31,11 +31,11 @@ class TestSeverityMapping:
 
 class TestRuffAdapterAvailability:
     def test_available_when_ruff_found(self):
-        with patch("shutil.which", return_value="/usr/bin/ruff"):
+        with patch("custodian.adapters.ruff.find_tool", return_value="/usr/bin/ruff"):
             assert RuffAdapter().is_available() is True
 
     def test_unavailable_when_ruff_missing(self):
-        with patch("shutil.which", return_value=None):
+        with patch("custodian.adapters.ruff.find_tool", return_value=None):
             assert RuffAdapter().is_available() is False
 
 

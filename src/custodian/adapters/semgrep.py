@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-from custodian.adapters.base import ToolAdapter
+from custodian.adapters.base import ToolAdapter, find_tool
 from custodian.core.finding import Finding, HIGH, MEDIUM, LOW
 
 # Semgrep severity strings → canonical severity
@@ -38,7 +37,7 @@ class SemgrepAdapter(ToolAdapter):
         self._configs = configs or []
 
     def is_available(self) -> bool:
-        return shutil.which("semgrep") is not None
+        return find_tool("semgrep") is not None
 
     def run(self, repo_path: Path, config: dict) -> list[Finding]:
         src_root = repo_path / config.get("src_root", "src")
@@ -54,7 +53,7 @@ class SemgrepAdapter(ToolAdapter):
             # No rules — nothing to run
             return []
 
-        cmd = ["semgrep", "--json", "--quiet"]
+        cmd = [find_tool("semgrep") or "semgrep", "--json", "--quiet"]
         for cfg in configs:
             cmd += ["--config", cfg]
         cmd.append(str(src_root))

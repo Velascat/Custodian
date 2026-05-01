@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
-
-from custodian.adapters.base import ToolAdapter
+from custodian.adapters.base import ToolAdapter, find_tool
 from custodian.core.finding import Finding, HIGH, MEDIUM, LOW
 
 # ty concise output: path:line:col: level[rule-id] message
@@ -36,14 +34,14 @@ class TyAdapter(ToolAdapter):
     name = "ty"
 
     def is_available(self) -> bool:
-        return shutil.which("ty") is not None
+        return find_tool("ty") is not None
 
     def run(self, repo_path: Path, config: dict) -> list[Finding]:
         src_root = repo_path / config.get("src_root", "src")
         if not src_root.exists():
             src_root = repo_path
 
-        cmd = ["ty", "check", "--output-format", "concise", str(src_root)]
+        cmd = [find_tool("ty") or "ty", "check", "--output-format", "concise", str(src_root)]
 
         try:
             proc = subprocess.run(

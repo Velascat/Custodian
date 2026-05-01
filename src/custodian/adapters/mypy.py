@@ -9,11 +9,10 @@ mypy output format (with --no-error-summary --show-column-numbers):
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-from custodian.adapters.base import ToolAdapter
+from custodian.adapters.base import ToolAdapter, find_tool
 from custodian.core.finding import Finding, HIGH, MEDIUM, LOW
 
 # mypy: path:line:col: level: message  [code]
@@ -42,7 +41,7 @@ class MypyAdapter(ToolAdapter):
     name = "mypy"
 
     def is_available(self) -> bool:
-        return shutil.which("mypy") is not None
+        return find_tool("mypy") is not None
 
     def run(self, repo_path: Path, config: dict) -> list[Finding]:
         src_root = repo_path / config.get("src_root", "src")
@@ -50,7 +49,7 @@ class MypyAdapter(ToolAdapter):
             src_root = repo_path
 
         cmd = [
-            "mypy",
+            find_tool("mypy") or "mypy",
             "--no-error-summary",
             "--show-column-numbers",
             "--output=normal",

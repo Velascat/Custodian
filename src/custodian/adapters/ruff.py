@@ -5,11 +5,9 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
-
-from custodian.adapters.base import ToolAdapter
+from custodian.adapters.base import ToolAdapter, find_tool
 from custodian.core.finding import Finding, CRITICAL, HIGH, MEDIUM, LOW
 
 # Longest-prefix-first severity table.  First match wins.
@@ -73,14 +71,14 @@ class RuffAdapter(ToolAdapter):
         self._extra_args = ruff_args or []
 
     def is_available(self) -> bool:
-        return shutil.which("ruff") is not None
+        return find_tool("ruff") is not None
 
     def run(self, repo_path: Path, config: dict) -> list[Finding]:
         src_root = repo_path / config.get("src_root", "src")
         if not src_root.exists():
             src_root = repo_path
 
-        cmd = ["ruff", "check", "--output-format=json", str(src_root), *self._extra_args]
+        cmd = [find_tool("ruff") or "ruff", "check", "--output-format=json", str(src_root), *self._extra_args]
         env = {**os.environ, "RUFF_NO_CACHE": "1"}
 
         try:

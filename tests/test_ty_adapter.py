@@ -20,11 +20,11 @@ class TestTySeverityMapping:
 
 class TestTyAdapterAvailability:
     def test_available_when_ty_found(self):
-        with patch("shutil.which", return_value="/usr/bin/ty"):
+        with patch("custodian.adapters.ty.find_tool", return_value="/usr/bin/ty"):
             assert TyAdapter().is_available() is True
 
     def test_unavailable_when_ty_missing(self):
-        with patch("shutil.which", return_value=None):
+        with patch("custodian.adapters.ty.find_tool", return_value=None):
             assert TyAdapter().is_available() is False
 
 

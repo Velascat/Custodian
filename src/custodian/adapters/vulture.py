@@ -12,11 +12,9 @@ code but have false-positive risk for dynamic dispatch, plugins, and public APIs
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
-
-from custodian.adapters.base import ToolAdapter
+from custodian.adapters.base import ToolAdapter, find_tool
 from custodian.core.finding import Finding, LOW
 
 # path:line: unused <type> 'name' (N% confidence)
@@ -51,7 +49,7 @@ class VultureAdapter(ToolAdapter):
         self._min_confidence = min_confidence
 
     def is_available(self) -> bool:
-        return shutil.which("vulture") is not None
+        return find_tool("vulture") is not None
 
     def run(self, repo_path: Path, config: dict) -> list[Finding]:
         src_root = repo_path / config.get("src_root", "src")
@@ -61,7 +59,7 @@ class VultureAdapter(ToolAdapter):
         min_conf = config.get("vulture_min_confidence", self._min_confidence)
 
         cmd = [
-            "vulture",
+            find_tool("vulture") or "vulture",
             str(src_root),
             f"--min-confidence={min_conf}",
         ]

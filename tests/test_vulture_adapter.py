@@ -19,11 +19,11 @@ class TestRuleFromMessage:
 
 class TestVultureAdapterAvailability:
     def test_available(self):
-        with patch("shutil.which", return_value="/usr/bin/vulture"):
+        with patch("custodian.adapters.vulture.find_tool", return_value="/usr/bin/vulture"):
             assert VultureAdapter().is_available() is True
 
     def test_unavailable(self):
-        with patch("shutil.which", return_value=None):
+        with patch("custodian.adapters.vulture.find_tool", return_value=None):
             assert VultureAdapter().is_available() is False
 
 
