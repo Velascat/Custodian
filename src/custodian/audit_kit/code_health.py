@@ -805,15 +805,42 @@ _CREDENTIAL_NAMES = frozenset({
     "credentials", "credential",
 })
 
+_CREDENTIAL_NAME_EXCLUSION_SUFFIXES = frozenset({
+    "endpoint", "url", "uri", "path", "env", "var", "name", "param",
+    "header", "field", "label",
+})
+
 _PLACEHOLDER_RE = re.compile(
     r"(?i)(your[-_]?|example|test[-_]?|dummy|fake|change[-_]?me|"
     r"replace|placeholder|xxx+|yyy+|aaa+|\$\{|<[^>]+>|todo|fixme)"
 )
 
+_ENV_VAR_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
+
 
 def _is_credential_name(name: str) -> bool:
-    low = name.lower().rstrip("s")  # passwords → password
-    return low in _CREDENTIAL_NAMES or any(kw in low for kw in _CREDENTIAL_NAMES)
+    """True if the variable/key name refers to an actual credential value.
+
+    Uses word-boundary matching: splits on ``_``, ``.``, ``-`` and checks
+    unigrams and bigrams against the credential name set.  Names whose last
+    word is an exclusion suffix (endpoint, url, env, …) are skipped — they
+    typically hold a URL or env-var name, not the secret itself.
+
+    Examples that match:  password, api_key, client_secret, auth_token
+    Examples that don't:  token_endpoint, word_tokenizer, secret_env
+    """
+    words = [w.lower().rstrip("s") for w in re.split(r"[_.\-]", name) if w]
+    if not words:
+        return False
+    # If the last word is a non-credential suffix, this name is a URL/env ref
+    if words[-1] in _CREDENTIAL_NAME_EXCLUSION_SUFFIXES:
+        return False
+    # Check unigrams
+    if any(w in _CREDENTIAL_NAMES for w in words):
+        return True
+    # Check bigrams (api_key, access_key, client_secret, etc.)
+    bigrams = ["_".join(words[i:i+2]) for i in range(len(words) - 1)]
+    return any(b in _CREDENTIAL_NAMES for b in bigrams)
 
 
 def _is_real_credential(value: str) -> bool:
@@ -821,6 +848,12 @@ def _is_real_credential(value: str) -> bool:
     if not value or len(value) < 4:
         return False
     if _PLACEHOLDER_RE.search(value):
+        return False
+    # URL values are not credentials
+    if value.startswith(("http://", "https://", "ftp://")):
+        return False
+    # ALL_CAPS values are env-var names pointing to where the secret lives
+    if _ENV_VAR_RE.match(value):
         return False
     return True
 

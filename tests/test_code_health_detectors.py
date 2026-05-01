@@ -726,3 +726,23 @@ def test_c32_skips_empty_password(tmp_path):
 def test_c32_skips_non_credential_name(tmp_path):
     ctx = _ctx(tmp_path, 'username = "alice"\n')
     assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_url_value(tmp_path):
+    ctx = _ctx(tmp_path, 'TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"\n')
+    assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_env_var_name_as_value(tmp_path):
+    ctx = _ctx(tmp_path, '_SECRET_ENV = "OPERATIONS_CENTER_WEBHOOK_SECRET"\n')
+    assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_token_in_tokenizer_key(tmp_path):
+    ctx = _ctx(tmp_path, 'cfg = {"word_tokenizer": "You are a script str"}\n')
+    assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_token_endpoint_name(tmp_path):
+    ctx = _ctx(tmp_path, 'token_endpoint = "https://example.com/oauth"\n')
+    assert detect_c32(ctx).count == 0

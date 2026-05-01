@@ -376,6 +376,16 @@ class TestD5:
         ctx = _d5_context(tmp_path, "class FooError(Exception):\n    pass\n")
         assert detect_d5(ctx).count == 0
 
+    def test_protocol_class_not_flagged(self, tmp_path):
+        src = "from typing import Protocol\nclass MyPort(Protocol):\n    def do(self) -> None: ...\n"
+        ctx = _d5_context(tmp_path, src)
+        assert detect_d5(ctx).count == 0
+
+    def test_abc_class_not_flagged(self, tmp_path):
+        src = "from abc import ABC\nclass MyBase(ABC):\n    pass\n"
+        ctx = _d5_context(tmp_path, src)
+        assert detect_d5(ctx).count == 0
+
     def test_class_in_all_not_flagged(self, tmp_path):
         src = '__all__ = ["MyClass"]\nclass MyClass:\n    pass\n'
         ctx = _d5_context(tmp_path, src)

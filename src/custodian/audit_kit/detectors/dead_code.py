@@ -154,6 +154,14 @@ def detect_d5(context: AuditContext) -> DetectorResult:
                 continue
             if name.endswith(("Error", "Exception", "Warning", "Fault")):
                 continue
+            # Protocol subclasses are structural interfaces used only as type
+            # annotations; with PEP 563 lazy evaluation those refs aren't Name Loads
+            if any(
+                (isinstance(b, ast.Name) and b.id in {"Protocol", "ABC"})
+                or (isinstance(b, ast.Attribute) and b.attr in {"Protocol", "ABC"})
+                for b in stmt.bases
+            ):
+                continue
             if name in cg.called_names:
                 continue
             count += 1
