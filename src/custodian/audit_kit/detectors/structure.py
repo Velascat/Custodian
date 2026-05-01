@@ -29,6 +29,12 @@ S3  Test-only imports in production code — a ``src/`` file imports from a
     production code; shared fixtures belong in a separate ``conftest.py``
     or helper package inside ``src/``.
 
+S4  Missing venv guard in tests/conftest.py — the top-level conftest must
+    contain a ``sys.prefix`` / ``_EXPECTED_VENV`` check so that tests cannot
+    silently run against the wrong Python environment.  Absent guard means CI
+    or a developer can run the suite with a foreign venv and get misleading
+    green results from the wrong package versions.
+
 Config example for S1::
 
     architecture:
@@ -73,6 +79,8 @@ def build_structure_detectors() -> list[Detector]:
                  LOW, _NEEDS),
         Detector("S3", "test-only import in production code", "open", detect_s3,
                  MEDIUM, _NEEDS_AST),
+        Detector("S4", "tests/conftest.py missing venv guard", "open", detect_s4,
+                 MEDIUM, frozenset()),
     ]
 
 
@@ -348,3 +356,39 @@ def detect_s3(context: AuditContext) -> DetectorResult:
                     samples.append(f"{rel}:{lineno}: imports {module_name!r}")
 
     return DetectorResult(count=count, samples=samples)
+
+
+# ── S4: missing venv guard in tests/conftest.py ────────────────────────────────
+
+_VENV_GUARD_MARKERS = ("sys.prefix", "_EXPECTED_VENV", "ACTIVE_PREFIX", "active_prefix")
+
+
+def detect_s4(context: AuditContext) -> DetectorResult:
+    """Flag repos whose tests/conftest.py lacks a venv guard.
+
+    A valid guard checks that the active Python environment matches the repo's
+    own .venv, preventing silent test runs against the wrong package set.
+    Skipped when tests_root does not exist (no tests directory).
+    """
+    tests_root = context.tests_root
+    if tests_root is None or not tests_root.is_dir():
+        return DetectorResult(count=0, samples=[])
+
+    conftest = tests_root / "conftest.py"
+    if not conftest.exists():
+        rel = str(conftest.relative_to(context.repo_root))
+        return DetectorResult(count=1, samples=[f"{rel}: file missing — add conftest.py with venv guard"])
+
+    try:
+        content = conftest.read_text(encoding="utf-8")
+    except OSError:
+        return DetectorResult(count=0, samples=[])
+
+    if any(marker in content for marker in _VENV_GUARD_MARKERS):
+        return DetectorResult(count=0, samples=[])
+
+    rel = str(conftest.relative_to(context.repo_root))
+    return DetectorResult(
+        count=1,
+        samples=[f"{rel}: no venv guard — add sys.prefix / _EXPECTED_VENV check"],
+    )

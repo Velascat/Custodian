@@ -11,7 +11,7 @@ import ast
 import textwrap
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.structure import detect_a1, detect_s1, detect_s2, detect_s3
+from custodian.audit_kit.detectors.structure import detect_a1, detect_s1, detect_s2, detect_s3, detect_s4
 from custodian.audit_kit.passes.ast_forest import AstForest
 from custodian.audit_kit.passes.import_graph import ImportGraph
 
@@ -310,3 +310,54 @@ class TestA1:
             ]}
         })
         assert detect_a1(ctx).count == 0
+
+
+class TestDetectS4:
+    def _ctx(self, tmp_path: Path, tests_root=None) -> AuditContext:
+        graph = AnalysisGraph()
+        return AuditContext(
+            repo_root=tmp_path,
+            src_root=tmp_path / "src",
+            tests_root=tests_root or tmp_path / "tests",
+            config={},
+            plugin_modules=[],
+            graph=graph,
+        )
+
+    def test_no_tests_dir_returns_zero(self, tmp_path):
+        ctx = self._ctx(tmp_path, tests_root=tmp_path / "nonexistent")
+        assert detect_s4(ctx).count == 0
+
+    def test_missing_conftest_returns_one(self, tmp_path):
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        ctx = self._ctx(tmp_path)
+        result = detect_s4(ctx)
+        assert result.count == 1
+        assert "missing" in result.samples[0].lower() or "conftest" in result.samples[0].lower()
+
+    def test_conftest_with_sys_prefix_guard_passes(self, tmp_path):
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "conftest.py").write_text(
+            "import sys\n_ACTIVE_PREFIX = sys.prefix\n_EXPECTED_VENV = '.venv'\n"
+            "if _ACTIVE_PREFIX != _EXPECTED_VENV: raise SystemExit('wrong env')\n"
+        )
+        ctx = self._ctx(tmp_path)
+        assert detect_s4(ctx).count == 0
+
+    def test_conftest_with_expected_venv_marker_passes(self, tmp_path):
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "conftest.py").write_text("_EXPECTED_VENV = '.venv'\n")
+        ctx = self._ctx(tmp_path)
+        assert detect_s4(ctx).count == 0
+
+    def test_conftest_without_guard_returns_one(self, tmp_path):
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "conftest.py").write_text("import pytest\n# just fixtures\n")
+        ctx = self._ctx(tmp_path)
+        result = detect_s4(ctx)
+        assert result.count == 1
+        assert "venv" in result.samples[0].lower() or "guard" in result.samples[0].lower()
