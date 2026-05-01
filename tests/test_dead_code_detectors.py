@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_d5, detect_f2
+from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_d5, detect_d6, detect_f2
 from custodian.audit_kit.passes.ast_forest import AstForest
 from custodian.audit_kit.passes.call_graph import build_call_graph
 
@@ -409,3 +409,110 @@ class TestD5:
             graph=None,
         )
         assert detect_d5(ctx).count == 0
+
+
+# ── D6 helpers ────────────────────────────────────────────────────────────────
+
+def _d6_context(
+    tmp_path: Path,
+    src_text: str,
+    extra_constructed: set[str] | None = None,
+    extra_called: set[str] | None = None,
+) -> AuditContext:
+    """Build an AuditContext with call_graph and ast_forest for D6 tests.
+
+    extra_constructed and extra_called allow injecting names directly into the
+    call graph to simulate annotation-only references without constructing.
+    """
+    import ast as _ast
+    from custodian.audit_kit.passes.ast_forest import AstForest
+
+    src_root = tmp_path / "src"
+    src_root.mkdir(parents=True, exist_ok=True)
+    path = src_root / "module.py"
+    src_dedented = textwrap.dedent(src_text)
+    path.write_text(src_dedented, encoding="utf-8")
+
+    cg = build_call_graph(src_root)
+
+    if extra_called:
+        cg.called_names.update(extra_called)
+    if extra_constructed:
+        cg.constructed_names.update(extra_constructed)
+
+    forest = AstForest()
+    tree = _ast.parse(src_dedented)
+    forest.trees[path] = tree
+    forest.sources[path] = src_dedented
+
+    graph = AnalysisGraph(call_graph=cg, ast_forest=forest)
+    return AuditContext(
+        repo_root=tmp_path,
+        src_root=src_root,
+        tests_root=tmp_path / "tests",
+        config={},
+        plugin_modules=[],
+        graph=graph,
+    )
+
+
+class TestD6:
+    def test_unreferenced_class_not_flagged_by_d6(self, tmp_path):
+        # D5 catches unreferenced classes; D6 must NOT double-flag them
+        ctx = _d6_context(tmp_path, "class Orphan:\n    pass\n")
+        assert detect_d6(ctx).count == 0
+
+    def test_instantiated_class_not_flagged(self, tmp_path):
+        ctx = _d6_context(tmp_path, "class Used:\n    pass\nobj = Used()\n")
+        assert detect_d6(ctx).count == 0
+
+    def test_annotation_only_class_flagged(self, tmp_path):
+        # MyDto is referenced (in called_names) but never constructed
+        src = "class MyDto:\n    pass\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"MyDto"})
+        # constructed_names does NOT include MyDto — should be flagged
+        assert detect_d6(ctx).count == 1
+
+    def test_annotation_only_sample_message(self, tmp_path):
+        src = "class MyDto:\n    pass\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"MyDto"})
+        result = detect_d6(ctx)
+        assert result.count == 1
+        assert "MyDto" in result.samples[0]
+        assert "never constructed" in result.samples[0]
+
+    def test_private_class_not_flagged(self, tmp_path):
+        src = "class _Internal:\n    pass\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"_Internal"})
+        assert detect_d6(ctx).count == 0
+
+    def test_test_class_not_flagged(self, tmp_path):
+        src = "class TestFoo:\n    pass\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"TestFoo"})
+        assert detect_d6(ctx).count == 0
+
+    def test_exception_class_not_flagged(self, tmp_path):
+        src = "class FooError(Exception):\n    pass\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"FooError"})
+        assert detect_d6(ctx).count == 0
+
+    def test_protocol_class_not_flagged(self, tmp_path):
+        src = "from typing import Protocol\nclass MyPort(Protocol):\n    def do(self) -> None: ...\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"MyPort"})
+        assert detect_d6(ctx).count == 0
+
+    def test_abc_class_not_flagged(self, tmp_path):
+        src = "from abc import ABC\nclass MyBase(ABC):\n    pass\n"
+        ctx = _d6_context(tmp_path, src, extra_called={"MyBase"})
+        assert detect_d6(ctx).count == 0
+
+    def test_no_graph_returns_zero(self, tmp_path):
+        ctx = AuditContext(
+            repo_root=tmp_path,
+            src_root=tmp_path / "src",
+            tests_root=tmp_path / "tests",
+            config={},
+            plugin_modules=[],
+            graph=None,
+        )
+        assert detect_d6(ctx).count == 0

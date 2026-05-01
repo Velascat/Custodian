@@ -29,6 +29,15 @@ D5  Module-level classes never referenced anywhere in the codebase.
     scanned file — it is never instantiated, subclassed, used in
     isinstance(), used as a type annotation, or imported.  Complements D1.
 
+D6  Module-level classes referenced (e.g. in type annotations or imports)
+    but never instantiated (constructor never called) in the codebase.
+    Complements D5: catches classes that exist in the type system but are
+    never constructed — common with DTO classes defined for pipelines that
+    are partially implemented.  Only flags classes whose name appears in
+    called_names (referenced) but not in constructed_names (never called
+    as a constructor).  Does NOT flag classes not in called_names — D5
+    covers that case.
+
 F1  ``@dataclass`` fields never accessed as attributes anywhere in the
     codebase.  Uses the call-graph pass to collect all attribute accesses.
     Conservative: only flags fields whose name does not appear in any
@@ -75,6 +84,8 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_d4, MEDIUM, _NEEDS_AST),
         Detector("D5", "module-level class never referenced in codebase", "open",
                  detect_d5, LOW, _NEEDS_CG_AND_AST),
+        Detector("D6", "class defined but never instantiated (constructor never called)", "open",
+                 detect_d6, LOW, _NEEDS_CG_AND_AST),
         Detector("F1", "dataclass field never accessed as attribute in codebase", "open",
                  detect_f1, LOW, _NEEDS_CG),
         Detector("F2", "private module-level constant defined but never referenced", "open",
@@ -172,6 +183,65 @@ def detect_d5(context: AuditContext) -> DetectorResult:
             if len(samples) < _MAX_SAMPLES:
                 rel = path.relative_to(context.repo_root)
                 samples.append(f"{rel}:{stmt.lineno}: class {name} — never referenced")
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D6 ────────────────────────────────────────────────────────────────────────
+
+def detect_d6(context: AuditContext) -> DetectorResult:
+    """Flag module-level classes referenced but never instantiated in the codebase.
+
+    D6 complements D5: D5 catches classes that are never mentioned at all;
+    D6 catches classes that appear in the type system (annotations, imports,
+    isinstance checks) but whose constructor is never called anywhere.
+
+    Only flags if:
+    - name is in cg.called_names (referenced somewhere — D5 skips these)
+    - name is NOT in cg.constructed_names (constructor never called)
+
+    Same skips as D5: private, __all__, Test*, Error/Exception/Warning/Fault,
+    Protocol/ABC base classes.
+    """
+    if (context.graph is None
+            or context.graph.call_graph is None
+            or context.graph.ast_forest is None):
+        return DetectorResult(count=0, samples=[])
+
+    cg = context.graph.call_graph
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        for stmt in tree.body:
+            if not isinstance(stmt, ast.ClassDef):
+                continue
+            name = stmt.name
+            if name.startswith("_"):
+                continue
+            if name in cg.defined_in_all:
+                continue
+            if name.startswith("Test"):
+                continue
+            if name.endswith(("Error", "Exception", "Warning", "Fault")):
+                continue
+            if any(
+                (isinstance(b, ast.Name) and b.id in {"Protocol", "ABC"})
+                or (isinstance(b, ast.Attribute) and b.attr in {"Protocol", "ABC"})
+                for b in stmt.bases
+            ):
+                continue
+            # Only flag if referenced (in called_names) but never constructed
+            if name not in cg.called_names:
+                continue  # D5 covers this case
+            if name in cg.constructed_names:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(
+                    f"{rel}:{stmt.lineno}: class {name} — never constructed (referenced in annotations/imports only)"
+                )
 
     return DetectorResult(count=count, samples=samples)
 

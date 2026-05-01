@@ -49,6 +49,7 @@ class CallGraph:
     defined_in_all: set[str] = field(default_factory=set)
     decorated_names: set[str] = field(default_factory=set)
     framework_decorated: set[str] = field(default_factory=set)
+    constructed_names: set[str] = field(default_factory=set)
 
 
 def build_call_graph(src_root: Path, extra_roots: list[Path] | None = None) -> CallGraph:
@@ -90,6 +91,7 @@ def _collect_usages_only(tree: ast.Module, cg: CallGraph) -> None:
             func = node.func
             if isinstance(func, ast.Name):
                 cg.called_names.add(func.id)
+                cg.constructed_names.add(func.id)
             elif isinstance(func, ast.Attribute):
                 cg.called_attrs.add(func.attr)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
@@ -135,6 +137,7 @@ def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
             func = node.func
             if isinstance(func, ast.Name):
                 cg.called_names.add(func.id)
+                cg.constructed_names.add(func.id)
             elif isinstance(func, ast.Attribute):
                 cg.called_attrs.add(func.attr)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
