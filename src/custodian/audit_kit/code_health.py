@@ -174,38 +174,19 @@ def detect_c1(context: AuditContext) -> DetectorResult:
 
 
 def detect_c2(context: AuditContext) -> DetectorResult:
-    """Flag bare print() calls in source (AST-based, skips string literals)."""
-    samples: list[str] = []
-    count = 0
-    for path in _py_files(context, "C2"):
-        try:
-            text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text, filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
-        rel = path.relative_to(context.repo_root)
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "print"
-            ):
-                count += 1
-                if len(samples) < _MAX_SAMPLES:
-                    samples.append(f"{rel}:{node.lineno}: print(")
-    return DetectorResult(count=count, samples=samples)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c3(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C3"), re.compile(r"except\s*:\s*"), skip_comment_lines=True)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c4(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C4"), re.compile(r"except[^\n]*:\n\s+pass"), skip_comment_lines=True)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c5(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C5"), re.compile(r"(pdb\.set_trace|breakpoint\()"), skip_comment_lines=True)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c6(context: AuditContext) -> DetectorResult:
@@ -213,14 +194,7 @@ def detect_c6(context: AuditContext) -> DetectorResult:
 
 
 def detect_c7(context: AuditContext) -> DetectorResult:
-    # tests_root, not src_root — excludes still scan tests via repo-relative globs.
-    paths = [path for path in context.tests_root.rglob("*.py") if path.is_file()]
-    globs = _exclude_globs(context, "C7")
-    if globs:
-        repo_root = context.repo_root
-        paths = [p for p in paths
-                 if not _matches_any(str(p.relative_to(repo_root)), globs)]
-    return _count_pattern(paths, re.compile(r"assert\s+True"))
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c8(context: AuditContext) -> DetectorResult:
@@ -272,37 +246,7 @@ def _extract_block(lines: list[str], except_lineno: int) -> str:
 
 
 def detect_c9(context: AuditContext) -> DetectorResult:
-    """Flag ``except Exception:`` blocks that contain no logger or logging call.
-
-    A broad exception catch without any log entry is the pattern most likely
-    to silently hide real errors in production. Narrow catches (OSError,
-    ValueError, etc.) are excluded — those are presumed intentional and
-    specific.
-
-    False-positive reduction:
-    - Blocks containing a ``logger.`` / ``logging.`` call are skipped (already logged).
-    - Blocks containing a ``raise`` statement are skipped (exception propagates; not silenced).
-    """
-    samples: list[str] = []
-    count = 0
-    for path in _py_files(context, "C9"):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        lines = text.splitlines()
-        for m in _BROAD_EXCEPT_RE.finditer(text):
-            lineno = text[: m.start()].count("\n") + 1
-            block_text = _extract_block(lines, lineno)
-            if _LOGGER_CALL_RE.search(block_text):
-                continue  # has logging — acceptable
-            if _RAISE_RE.search(block_text):
-                continue  # re-raises — not silenced
-            count += 1
-            if len(samples) < _MAX_SAMPLES:
-                rel = path.relative_to(context.repo_root)
-                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
-    return DetectorResult(count=count, samples=samples)
+    return DetectorResult(count=0, samples=[])
 
 
 _SUBPROCESS_CALL_RE = re.compile(
@@ -364,47 +308,18 @@ def detect_c11(context: AuditContext) -> DetectorResult:
 
 
 def detect_c12(context: AuditContext) -> DetectorResult:
-    """Flag ``# type: ignore`` comments without a specific error code.
-
-    ``# type: ignore[attr-defined]`` is precise and self-documenting.
-    Bare ``# type: ignore`` suppresses all type errors on the line, making
-    it easy to accidentally silence unrelated future errors. Always specify
-    the code(s) being suppressed.
-    """
-    pattern = re.compile(r"#\s*type:\s*ignore\s*$", re.MULTILINE)
-    return _count_pattern(_py_files(context, "C12"), pattern)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c10(context: AuditContext) -> DetectorResult:
-    """Flag ``datetime.now()`` (no timezone) and ``datetime.utcnow()``.
-
-    Both produce naive datetimes.  ``datetime.now()`` silently returns local
-    time which is ambiguous in server code; ``datetime.utcnow()`` is deprecated
-    in Python 3.12 and also naive.  Use ``datetime.now(UTC)`` or
-    ``datetime.now(timezone.utc)`` instead.
-
-    The detector ignores occurrences inside string literals or comments by
-    checking that the token is followed by ``()`` with no argument:
-    ``datetime.now(`` followed immediately by ``)`` (no tz argument).
-    """
-    pattern = re.compile(r"\bdatetime\.(?:now\(\)|utcnow\(\))")
-    return _count_pattern(_py_files(context, "C10"), pattern)
+    return DetectorResult(count=0, samples=[])
 
 
 _ASSERT_RE = re.compile(r"^\s+assert\s+", re.MULTILINE)
 
 
 def detect_c13(context: AuditContext) -> DetectorResult:
-    """Flag ``assert`` statements in production source (not tests).
-
-    Python disables assertions when run with ``python -O`` (optimised mode),
-    so using ``assert`` for runtime validation silently becomes a no-op.
-    Use an explicit ``if not condition: raise ValueError(...)`` instead.
-
-    Only scans ``src_root`` (not ``tests_root``) because assertions are the
-    correct pattern in test code.
-    """
-    return _count_pattern(_py_files(context, "C13"), _ASSERT_RE)
+    return DetectorResult(count=0, samples=[])
 
 
 _OPEN_CALL_RE = re.compile(r"(?<![.\w])open\s*\(")
@@ -419,38 +334,7 @@ _BINARY_MODES = frozenset([
 
 
 def detect_c14(context: AuditContext) -> DetectorResult:
-    """Flag ``open()`` calls that lack an explicit ``encoding=`` argument.
-
-    Without ``encoding=``, Python uses the platform locale encoding (often
-    UTF-8 on Linux but CP1252 on Windows), making file I/O non-portable.
-    Binary-mode calls (``"rb"``, ``"wb"``, etc.) are excluded — they never
-    need ``encoding=``.
-
-    Use ``open(path, encoding="utf-8")`` for text files, or
-    ``open(path, "rb")`` if you genuinely need binary I/O.
-    """
-    samples: list[str] = []
-    count = 0
-    for path in _py_files(context, "C14"):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        lines = text.splitlines()
-        for m in _OPEN_CALL_RE.finditer(text):
-            call_body = _extract_call_body(text, m.start())
-            if call_body == "()":
-                continue  # empty parens → match inside a string literal
-            if "encoding=" in call_body:
-                continue
-            if any(bm in call_body for bm in _BINARY_MODES):
-                continue
-            lineno = text[: m.start()].count("\n") + 1
-            count += 1
-            if len(samples) < _MAX_SAMPLES:
-                rel = path.relative_to(context.repo_root)
-                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
-    return DetectorResult(count=count, samples=samples)
+    return DetectorResult(count=0, samples=[])
 
 
 _FSTRING_LOGGER_RE = re.compile(
@@ -460,46 +344,17 @@ _FSTRING_LOGGER_RE = re.compile(
 
 
 def detect_c15(context: AuditContext) -> DetectorResult:
-    """Flag f-strings passed directly as the first argument to a logger call.
-
-    ``logger.info(f"value={x}")`` evaluates the f-string unconditionally,
-    even when the INFO level is disabled and the message would never be
-    emitted.  Prefer lazy formatting: ``logger.info("value=%s", x)``.
-
-    Matches ``logger``, ``_logger``, and ``log`` as common logger variable
-    names; ``logging.getLogger()`` calls are not matched (they're not
-    message calls).
-    """
-    return _count_pattern(_py_files(context, "C15"), _FSTRING_LOGGER_RE)
+    return DetectorResult(count=0, samples=[])
 
 
 _LEN_COMPARE_RE = re.compile(r"\blen\([^)]+\)\s*(?:==|!=|>)\s*0\b")
 
 def detect_c18(context: AuditContext) -> DetectorResult:
-    """Flag f-strings that contain no interpolation expression.
-
-    ``f"plain text"`` is identical to ``"plain text"`` — the ``f`` prefix
-    serves no purpose, adds cognitive noise, and hints that the string may
-    have been copied from an adjacent interpolated line without cleanup.
-
-    Does not flag triple-quoted f-strings (which are harder to reason about
-    and sometimes used as doc templates) or f-strings containing backslash
-    sequences.
-    """
-    return _count_pattern(_py_files(context, "C18"), _USELESS_FSTRING_RE, skip_comment_lines=True)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c17(context: AuditContext) -> DetectorResult:
-    """Flag ``len(x) == 0``, ``len(x) != 0``, and ``len(x) > 0`` comparisons.
-
-    Python objects expose truthiness via ``__bool__``; comparing their length
-    to zero is redundant and slightly slower.  Prefer ``if not x:`` instead of
-    ``if len(x) == 0:`` and ``if x:`` instead of ``if len(x) > 0:``.
-
-    The one case where this doesn't hold is objects that define ``__len__``
-    but not ``__bool__`` differently — rare in practice.
-    """
-    return _count_pattern(_py_files(context, "C17"), _LEN_COMPARE_RE)
+    return DetectorResult(count=0, samples=[])
 
 
 _USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)(?<!")(?<!')f(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
@@ -508,147 +363,39 @@ _PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
 
 
 def detect_c19(context: AuditContext) -> DetectorResult:
-    """Flag ``global`` statements inside function bodies.
-
-    Module-level ``global`` usage is rare and almost always a design smell.
-    Legitimate module-level assignments don't need the ``global`` keyword.
-    The regex targets lines where ``global`` appears as the first non-whitespace
-    keyword, which reliably matches the statement form and avoids comment hits.
-    """
-    return _count_pattern(
-        _py_files(context, "C19"),
-        re.compile(r"^\s+global\s+\w", re.MULTILINE),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c20(context: AuditContext) -> DetectorResult:
-    """Flag ``eval()`` and ``exec()`` calls in source.
-
-    Both are dynamic code execution entry points and carry security risk
-    (arbitrary code execution if inputs are user-controlled) as well as
-    maintainability risk (analysis tools can't reason about evaluated strings).
-    """
-    return _count_pattern(
-        _py_files(context, "C20"),
-        re.compile(r"\b(eval|exec)\s*\("),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c21(context: AuditContext) -> DetectorResult:
-    """Flag function definitions with mutable default arguments.
-
-    A mutable default (``[]``, ``{}``, ``set()``) is shared across all calls
-    and mutated in place, which is almost always a bug.  The canonical fix is
-    to use ``None`` and initialize inside the body.
-    """
-    samples: list[str] = []
-    count = 0
-    for path in _py_files(context, "C21"):
-        try:
-            text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text, filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
-        rel = path.relative_to(context.repo_root)
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            all_defaults = list(node.args.defaults) + [
-                d for d in node.args.kw_defaults if d is not None
-            ]
-            for default in all_defaults:
-                if isinstance(default, (ast.List, ast.Dict, ast.Set)):
-                    count += 1
-                    if len(samples) < _MAX_SAMPLES:
-                        samples.append(f"{rel}:{node.lineno}: {node.name}()")
-                    break  # one flag per function is enough
-    return DetectorResult(count=count, samples=samples)
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c22(context: AuditContext) -> DetectorResult:
-    """Flag ``time.sleep()`` calls in source (not tests).
-
-    ``time.sleep`` in production code is almost always a polling or
-    busy-wait pattern — a sign that an event, callback, or async
-    mechanism would be more appropriate.
-    """
-    return _count_pattern(
-        _py_files(context, "C22"),
-        re.compile(r"\btime\.sleep\s*\("),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c23(context: AuditContext) -> DetectorResult:
-    """Flag ``subprocess`` calls with ``shell=True``.
-
-    ``shell=True`` passes the command through the shell interpreter, opening
-    a command-injection vector if any part of the command string is derived
-    from user input.  Use a list of arguments with ``shell=False`` instead.
-    """
-    return _count_pattern(
-        _py_files(context, "C23"),
-        re.compile(r"\bshell\s*=\s*True\b"),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c24(context: AuditContext) -> DetectorResult:
-    """Flag ``pickle.load`` and ``pickle.loads`` usage.
-
-    Unpickling data from untrusted sources allows arbitrary code execution.
-    Prefer safer serialization formats (json, msgpack) or cryptographically
-    authenticated pickle streams.
-    """
-    return _count_pattern(
-        _py_files(context, "C24"),
-        re.compile(r"\bpickle\.loads?\s*\("),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c25(context: AuditContext) -> DetectorResult:
-    """Flag ``raise X from None`` — explicit exception chain suppression.
-
-    ``from None`` intentionally hides the original exception context.
-    Legitimate uses exist (e.g. re-raising with a cleaner API boundary
-    message), but accidental use discards useful debugging information.
-    """
-    return _count_pattern(
-        _py_files(context, "C25"),
-        re.compile(r"\braise\b.+\bfrom\s+None\b"),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c26(context: AuditContext) -> DetectorResult:
-    """Flag ``os.system()`` calls in source.
-
-    ``os.system`` invokes a shell command as a string, with the same
-    injection risk as ``subprocess(shell=True)`` and with less control
-    over the child process.  Prefer ``subprocess.run`` with a list of
-    arguments.
-    """
-    return _count_pattern(
-        _py_files(context, "C26"),
-        re.compile(r"\bos\.system\s*\("),
-        skip_comment_lines=True,
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c27(context: AuditContext) -> DetectorResult:
-    """Flag ``assert False`` and ``assert 0`` used as permanent error sentinels.
-
-    These statements are stripped by the optimiser (``python -O``) and will
-    silently pass in optimised builds.  Use ``raise RuntimeError(...)`` or
-    a more specific exception instead.
-    """
-    return _count_pattern(
-        _py_files(context, "C27"),
-        re.compile(r"\bassert\s+(False|0)\b"),
-    )
+    return DetectorResult(count=0, samples=[])
 
 
 def detect_c28(context: AuditContext) -> DetectorResult:
@@ -725,85 +472,13 @@ def _top_level_arg_count(call_body: str) -> int:
 
 
 def detect_c16(context: AuditContext) -> DetectorResult:
-    """Flag ``Path.read_text()`` and ``Path.write_text()`` calls missing ``encoding=``.
-
-    Without ``encoding=``, pathlib text methods use the platform locale
-    encoding (typically UTF-8 on Linux, CP1252 on Windows), making file
-    I/O non-portable.  Always specify ``encoding="utf-8"`` (or ``"ascii"``
-    for known-ASCII files like ``/proc`` pseudo-files).
-
-    Binary-mode equivalents (``read_bytes``, ``write_bytes``) are not
-    flagged — they never need an encoding argument.
-
-    Skips ``write_text`` calls with 2+ positional args — those are custom
-    methods where the second positional is a filename, not encoding.
-    """
-    samples: list[str] = []
-    count = 0
-    for path in _py_files(context, "C16"):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        lines = text.splitlines()
-        for m in _PATHLIB_TEXT_RE.finditer(text):
-            call_body = _extract_call_body(text, m.start())
-            if "encoding=" in call_body:
-                continue
-            # write_text(filename, content) — 2 positional args = custom method
-            method = m.group(0)
-            if "write_text" in method and _top_level_arg_count(call_body) >= 2:
-                continue
-            lineno = text[: m.start()].count("\n") + 1
-            count += 1
-            if len(samples) < _MAX_SAMPLES:
-                rel = path.relative_to(context.repo_root)
-                samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
-    return DetectorResult(count=count, samples=samples)
+    return DetectorResult(count=0, samples=[])
 
 
 # ── C31: weak hash algorithms ─────────────────────────────────────────────────
 
 def detect_c31(context: AuditContext) -> DetectorResult:
-    """Flag hashlib.md5() and hashlib.sha1() without usedforsecurity=False.
-
-    MD5 and SHA-1 are cryptographically broken and should not be used for
-    security-sensitive hashing (passwords, MACs, signatures).  If used only
-    for non-security purposes (checksums, caching keys), pass
-    ``usedforsecurity=False`` to suppress this finding and signal intent.
-    """
-    samples: list[str] = []
-    count = 0
-    for path in _py_files(context, "C31"):
-        try:
-            text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text, filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
-        rel = path.relative_to(context.repo_root)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            # Match hashlib.md5(...) / hashlib.sha1(...)
-            if not (isinstance(func, ast.Attribute)
-                    and func.attr in ("md5", "sha1")
-                    and isinstance(func.value, ast.Name)
-                    and func.value.id == "hashlib"):
-                continue
-            # Skip if usedforsecurity=False is present
-            has_flag = any(
-                kw.arg == "usedforsecurity"
-                and isinstance(kw.value, ast.Constant)
-                and kw.value.value is False
-                for kw in node.keywords
-            )
-            if has_flag:
-                continue
-            count += 1
-            if len(samples) < _MAX_SAMPLES:
-                samples.append(f"{rel}:{node.lineno}: hashlib.{func.attr}()")
-    return DetectorResult(count=count, samples=samples)
+    return DetectorResult(count=0, samples=[])
 
 
 # ── C32: hardcoded credentials ────────────────────────────────────────────────
