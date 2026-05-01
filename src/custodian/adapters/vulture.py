@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velascat
+"""Vulture adapter — advisory dead-code detection.
+
+Vulture output format:
+    path/file.py:10: unused variable 'x' (60% confidence)
+    path/file.py:15: unused function 'foo' (100% confidence)
+
+Findings from vulture are advisory (LOW severity) — they flag potential dead
+code but have false-positive risk for dynamic dispatch, plugins, and public APIs.
+"""
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+from custodian.adapters.base import ToolAdapter
+from custodian.core.finding import Finding, LOW
+
+# path:line: unused <type> 'name' (N% confidence)
+_LINE_RE = re.compile(
+    r"^(?P<path>.+):(?P<line>\d+):\s+(?P<message>unused .+)\s+\((?P<confidence>\d+)%"
+)
+
+# Extract kind from message for the rule name
+_KIND_RE = re.compile(r"^unused (\w+)")
+
+# Minimum confidence to emit a finding (below this = too noisy)
+_DEFAULT_MIN_CONFIDENCE = 60
+
+
+def _rule_from_message(message: str) -> str:
+    m = _KIND_RE.match(message)
+    if m:
+        return f"UNUSED_{m.group(1).upper()}"
+    return "UNUSED_CODE"
+
+
+class VultureAdapter(ToolAdapter):
+    """Runs Vulture for advisory dead-code detection.
+
+    All vulture findings are LOW severity — they are hints, not hard failures.
+    Use min_confidence to reduce false positives (default 60%).
+    """
+
+    name = "vulture"
+
+    def __init__(self, min_confidence: int = _DEFAULT_MIN_CONFIDENCE) -> None:
+        self._min_confidence = min_confidence
+
+    def is_available(self) -> bool:
+        return shutil.which("vulture") is not None
+
+    def run(self, repo_path: Path, config: dict) -> list[Finding]:
+        src_root = repo_path / config.get("src_root", "src")
+        if not src_root.exists():
+            src_root = repo_path
+
+        min_conf = config.get("vulture_min_confidence", self._min_confidence)
+
+        cmd = [
+            "vulture",
+            str(src_root),
+            f"--min-confidence={min_conf}",
+        ]
+
+        # If a whitelist file exists in the repo, include it
+        whitelist = repo_path / ".vulture_whitelist.py"
+        if whitelist.exists():
+            cmd.append(str(whitelist))
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+            )
+        except FileNotFoundError:
+            return [Finding.tool_unavailable(self.name)]
+
+        findings: list[Finding] = []
+        for raw_line in proc.stdout.splitlines():
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            m = _LINE_RE.match(raw_line)
+            if not m:
+                continue
+            confidence = int(m.group("confidence"))
+            if confidence < min_conf:
+                continue
+            path_str = m.group("path")
+            try:
+                rel = str(Path(path_str).relative_to(repo_path))
+            except ValueError:
+                rel = path_str
+            message = m.group("message")
+            findings.append(Finding(
+                tool=self.name,
+                rule=_rule_from_message(message),
+                severity=LOW,
+                path=rel,
+                line=int(m.group("line")),
+                message=f"{message} ({confidence}% confidence)",
+            ))
+
+        return findings
