@@ -1,0 +1,283 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velascat
+"""Tests for D-class and F-class detectors: D2, D4, F2."""
+from __future__ import annotations
+
+import ast
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from custodian.audit_kit.detector import AnalysisGraph, AuditContext
+from custodian.audit_kit.detectors.dead_code import detect_d2, detect_d4, detect_f2
+from custodian.audit_kit.passes.ast_forest import AstForest
+
+
+def _forest_from_source(src: str, tmp_path: Path, name: str = "module.py") -> AstForest:
+    src_root = tmp_path / "src"
+    src_root.mkdir(parents=True, exist_ok=True)
+    path = src_root / name
+    src = textwrap.dedent(src)
+    path.write_text(src, encoding="utf-8")
+    tree = ast.parse(src)
+    forest = AstForest()
+    forest.trees[path] = tree
+    forest.sources[path] = src
+    return forest
+
+
+def _make_context(tmp_path: Path, forest: AstForest) -> AuditContext:
+    graph = AnalysisGraph(ast_forest=forest)
+    return AuditContext(
+        repo_root=tmp_path,
+        src_root=tmp_path / "src",
+        tests_root=tmp_path / "tests",
+        config={},
+        plugin_modules=[],
+        graph=graph,
+    )
+
+
+# ── D2 tests ──────────────────────────────────────────────────────────────────
+
+class TestD2:
+    def test_no_forest_returns_zero(self, tmp_path):
+        ctx = _make_context(tmp_path, AstForest())
+        ctx.graph = AnalysisGraph(ast_forest=None)
+        assert detect_d2(ctx).count == 0
+
+    def test_guard_clause_else_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            def foo(x):
+                if x < 0:
+                    return -1
+                else:
+                    return x + 1
+        """, tmp_path)
+        # if-body terminates, else-body does NOT terminate → D2
+        # Wait — else returns too, so else terminates. Let's use a non-terminal else.
+        forest = _forest_from_source("""
+            def foo(x):
+                if x < 0:
+                    return -1
+                else:
+                    x = x + 1
+                return x
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_symmetric_if_else_not_flagged(self, tmp_path):
+        # Both branches terminate — intentional, not flagged
+        forest = _forest_from_source("""
+            def foo(x):
+                if x < 0:
+                    return -1
+                else:
+                    return 1
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_elif_not_flagged(self, tmp_path):
+        # elif is represented as orelse=[If(...)], excluded by isinstance check
+        forest = _forest_from_source("""
+            def foo(x):
+                if x < 0:
+                    return -1
+                elif x == 0:
+                    return 0
+                else:
+                    return 1
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_no_else_not_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            def foo(x):
+                if x < 0:
+                    return -1
+                return x
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_raise_in_if_body_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            def validate(x):
+                if x is None:
+                    raise ValueError("x must not be None")
+                else:
+                    x = x.strip()
+                return x
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_module_level_if_not_flagged(self, tmp_path):
+        # D2 only checks inside function bodies
+        forest = _forest_from_source("""
+            if True:
+                x = 1
+            else:
+                x = 2
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_sample_text_contains_function_name(self, tmp_path):
+        forest = _forest_from_source("""
+            def my_func(x):
+                if x < 0:
+                    return -1
+                else:
+                    x = 0
+                return x
+        """, tmp_path)
+        result = detect_d2(_make_context(tmp_path, forest))
+        assert result.count == 1
+        assert "my_func" in result.samples[0]
+
+
+# ── D4 tests ──────────────────────────────────────────────────────────────────
+
+class TestD4:
+    def test_no_forest_returns_zero(self, tmp_path):
+        ctx = _make_context(tmp_path, AstForest())
+        ctx.graph = AnalysisGraph(ast_forest=None)
+        assert detect_d4(ctx).count == 0
+
+    def test_code_after_return_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            def foo():
+                return 1
+                x = 2
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_code_after_raise_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            def foo():
+                raise ValueError
+                return 1
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_no_unreachable_code_not_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            def foo():
+                x = 1
+                return x
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_conditional_return_not_flagged(self, tmp_path):
+        # return inside an if — code after is reachable
+        forest = _forest_from_source("""
+            def foo(x):
+                if x < 0:
+                    return -1
+                return x
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_unreachable_in_nested_block(self, tmp_path):
+        forest = _forest_from_source("""
+            def foo(items):
+                for item in items:
+                    return item
+                    x = 1
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_async_function_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            async def foo():
+                return 1
+                await something()
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_sample_text_contains_function_name(self, tmp_path):
+        forest = _forest_from_source("""
+            def dead_zone():
+                return 0
+                print("never")
+        """, tmp_path)
+        result = detect_d4(_make_context(tmp_path, forest))
+        assert result.count == 1
+        assert "dead_zone" in result.samples[0]
+
+
+# ── F2 tests ──────────────────────────────────────────────────────────────────
+
+class TestF2:
+    def test_no_forest_returns_zero(self, tmp_path):
+        ctx = _make_context(tmp_path, AstForest())
+        ctx.graph = AnalysisGraph(ast_forest=None)
+        assert detect_f2(ctx).count == 0
+
+    def test_unused_private_constant_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            _THRESHOLD = 0.5
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_used_private_constant_not_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            _THRESHOLD = 0.5
+
+            def check(x):
+                return x > _THRESHOLD
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_public_constant_not_flagged(self, tmp_path):
+        # F2 only matches _PRIVATE_CAPS (leading underscore required)
+        forest = _forest_from_source("""
+            THRESHOLD = 0.5
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_exported_via_all_not_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            _THRESHOLD = 0.5
+            __all__ = ["_THRESHOLD"]
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_annotated_assignment_flagged(self, tmp_path):
+        forest = _forest_from_source("""
+            _LIMIT: int = 10
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 1
+
+    def test_mixed_caps_lowercase_not_flagged(self, tmp_path):
+        # _CamelCase or _mixed_lower don't match _ALL_CAPS pattern
+        forest = _forest_from_source("""
+            _my_value = 1
+            _MyClass = object
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 0
+
+    def test_sample_text_contains_name(self, tmp_path):
+        forest = _forest_from_source("""
+            _DEAD_CONSTANT = 42
+        """, tmp_path)
+        result = detect_f2(_make_context(tmp_path, forest))
+        assert result.count == 1
+        assert "_DEAD_CONSTANT" in result.samples[0]

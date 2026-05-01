@@ -9,6 +9,7 @@ import yaml
 
 from custodian.audit_kit.code_health import build_code_health_detectors
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext, run_audit
+from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.result import AuditResult
@@ -54,6 +55,7 @@ def run_repo_audit(
     detectors  = (build_code_health_detectors()
                   + build_structure_detectors()
                   + build_stub_detectors()
+                  + build_dead_code_detectors()
                   + extra)
 
     if only:
