@@ -57,10 +57,17 @@ def _has_assertion_mechanism(node: ast.AST) -> bool:
     - pytest.raises / pytest.warns / etc. (``with pytest.raises(...):`` or call)
     - self.assertX / self.failX (unittest-style)
     - mock.assert_called_once() / mock.assert_not_called() / etc. (Mock-style)
+    - raise AssertionError(...) — explicit assertion failure
     """
     for child in ast.walk(node):
         if isinstance(child, ast.Assert):
             return True
+        # raise AssertionError(...) — explicit fail as assertion
+        if isinstance(child, ast.Raise) and child.exc is not None:
+            exc = child.exc
+            if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
+                if exc.func.id == "AssertionError":
+                    return True
         if not isinstance(child, ast.Call):
             continue
         func = child.func

@@ -171,3 +171,12 @@ class TestT2:
                 m.assert_called_once_with(42)
         """, tmp_path)
         assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_raise_assertion_error_not_flagged(self, tmp_path):
+        _write_test_file("""
+            def test_loop_asserts():
+                for item in []:
+                    if not item:
+                        raise AssertionError(f"item {item!r} failed")
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
