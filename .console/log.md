@@ -70,7 +70,7 @@
 
 ## Coverage map
 
-**What Custodian covers (63 detectors):**
+**What Custodian covers (70 detectors: 57 core + 13 OC plugin):**
 - Dead code: D1–D7 (functions, classes, branches, unreachable code, fields, partially-implemented pipelines, dead method params)
 - Partially implemented: U1–U3 (stub bodies), D6 (referenced but never constructed), G1 (ghost CamelCase names in comments)
 - Structure: S1 (import layer violations), S2 (circular imports), S3 (test import in src)
@@ -117,7 +117,7 @@
 
 ## Notes
 
-**Detector class map (62 total, counting 10 OC plugin detectors):**
+**Detector class map (70 total: 57 core + 13 OC plugin [OC1–OC9, AI1–AI4]):**
 - C (C1–C33): file-local code health — regex + inline AST; C33=ghost-work density (new)
 - S (S1–S3): cross-file structure — import_graph (S1, S2) + ast_forest (S3)
 - A (A1): architecture invariants — declarative YAML max_lines/max_classes/max_functions/forbidden_import (new)
