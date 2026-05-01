@@ -94,3 +94,40 @@ class TestFilterFindings:
         result = filter_findings(findings, ignore_paths={"tests/"})
         assert len(result) == 1
         assert result[0].path == "src/bar.py"
+
+
+class TestGetEnabledAdapters:
+    def test_empty_config_returns_no_adapters(self):
+        from custodian.adapters.registry import get_enabled_adapters
+        assert get_enabled_adapters({}) == []
+
+    def test_all_false_returns_no_adapters(self):
+        from custodian.adapters.registry import get_enabled_adapters
+        cfg = {"tools": {"ruff": False, "mypy": False, "vulture": False}}
+        assert get_enabled_adapters(cfg) == []
+
+    def test_ruff_enabled_returns_ruff_adapter(self):
+        from custodian.adapters.registry import get_enabled_adapters
+        from custodian.adapters.ruff import RuffAdapter
+        adapters = get_enabled_adapters({"tools": {"ruff": True}})
+        assert len(adapters) == 1
+        assert isinstance(adapters[0], RuffAdapter)
+
+    def test_vulture_enabled_returns_vulture_adapter(self):
+        from custodian.adapters.registry import get_enabled_adapters
+        from custodian.adapters.vulture import VultureAdapter
+        adapters = get_enabled_adapters({"tools": {"vulture": True}})
+        assert len(adapters) == 1
+        assert isinstance(adapters[0], VultureAdapter)
+
+    def test_multiple_tools_returns_multiple_adapters(self):
+        from custodian.adapters.registry import get_enabled_adapters
+        adapters = get_enabled_adapters({"tools": {"ruff": True, "vulture": True}})
+        assert len(adapters) == 2
+
+    def test_vulture_custom_min_confidence(self):
+        from custodian.adapters.registry import get_enabled_adapters
+        from custodian.adapters.vulture import VultureAdapter
+        adapters = get_enabled_adapters({"tools": {"vulture": True, "vulture_min_confidence": 80}})
+        assert isinstance(adapters[0], VultureAdapter)
+        assert adapters[0]._min_confidence == 80
