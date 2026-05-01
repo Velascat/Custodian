@@ -115,6 +115,25 @@ def _parse_test_files(tests_root: Path) -> list[tuple[Path, ast.Module]]:
 
 # ── T1 ────────────────────────────────────────────────────────────────────────
 
+def _t1_excluded_paths(context: AuditContext) -> set[str]:
+    """Repo-relative path strings excluded from T1 via audit.exclude_paths.T1."""
+    audit_cfg = context.config.get("audit") or {}
+    globs: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("T1") or [])
+    if not globs:
+        return set()
+    excluded: set[str] = set()
+    for path in context.src_root.rglob("*.py"):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(context.repo_root))
+        for g in globs:
+            from pathlib import PurePosixPath
+            if PurePosixPath(rel).match(g):
+                excluded.add(str(path))
+                break
+    return excluded
+
+
 def detect_t1(context: AuditContext) -> DetectorResult:
     """Flag public src functions/classes whose name never appears in any test file."""
     if (context.graph is None
@@ -131,10 +150,13 @@ def detect_t1(context: AuditContext) -> DetectorResult:
             elif isinstance(node, ast.Attribute):
                 test_name_refs.add(node.attr)
 
+    excluded_paths = _t1_excluded_paths(context)
     samples: list[str] = []
     count = 0
 
     for path, tree, _src in context.graph.ast_forest.items():
+        if str(path) in excluded_paths:
+            continue
         rel = path.relative_to(context.repo_root)
         for stmt in tree.body:  # module-level only
             if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
