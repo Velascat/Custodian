@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
+import ast
+import textwrap
+
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.structure import detect_s1, detect_s2
+from custodian.audit_kit.detectors.structure import detect_s1, detect_s2, detect_s3
+from custodian.audit_kit.passes.ast_forest import AstForest
 from custodian.audit_kit.passes.import_graph import ImportGraph
 
 
@@ -190,3 +194,59 @@ class TestS2:
         ctx = _make_context(tmp_path, import_graph=ig)
         result = detect_s2(ctx)
         assert result.count == 0  # three-way cycle, no direct mutual
+
+
+# ── S3 tests ──────────────────────────────────────────────────────────────────
+
+def _s3_context(tmp_path: Path, src_text: str) -> AuditContext:
+    src_root = tmp_path / "src"
+    src_root.mkdir(parents=True, exist_ok=True)
+    path = src_root / "module.py"
+    src = textwrap.dedent(src_text)
+    path.write_text(src, encoding="utf-8")
+    tree = ast.parse(src)
+    forest = AstForest()
+    forest.trees[path] = tree
+    forest.sources[path] = src
+    graph = AnalysisGraph(ast_forest=forest)
+    return AuditContext(
+        repo_root=tmp_path,
+        src_root=src_root,
+        tests_root=tmp_path / "tests",
+        config={},
+        plugin_modules=[],
+        graph=graph,
+    )
+
+
+class TestS3:
+    def test_import_tests_package_flagged(self, tmp_path):
+        ctx = _s3_context(tmp_path, "from tests.helpers import make_fixture\n")
+        assert detect_s3(ctx).count == 1
+
+    def test_import_test_module_flagged(self, tmp_path):
+        ctx = _s3_context(tmp_path, "import test_utils\n")
+        assert detect_s3(ctx).count == 1
+
+    def test_import_test_underscore_module_flagged(self, tmp_path):
+        ctx = _s3_context(tmp_path, "from test_helpers import something\n")
+        assert detect_s3(ctx).count == 1
+
+    def test_normal_import_not_flagged(self, tmp_path):
+        ctx = _s3_context(tmp_path, "import os\nfrom pathlib import Path\n")
+        assert detect_s3(ctx).count == 0
+
+    def test_src_import_not_flagged(self, tmp_path):
+        ctx = _s3_context(tmp_path, "from myapp.utils import helper\n")
+        assert detect_s3(ctx).count == 0
+
+    def test_no_graph_returns_zero(self, tmp_path):
+        ctx = AuditContext(
+            repo_root=tmp_path,
+            src_root=tmp_path / "src",
+            tests_root=tmp_path / "tests",
+            config={},
+            plugin_modules=[],
+            graph=None,
+        )
+        assert detect_s3(ctx).count == 0

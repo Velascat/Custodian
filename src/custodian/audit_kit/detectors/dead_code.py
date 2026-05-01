@@ -24,6 +24,11 @@ D4  Unreachable code after unconditional return/raise/break/continue.
     Recurses into nested if/for/while/try/with bodies but not into nested
     function or class definitions (separate scopes).
 
+D5  Module-level classes never referenced anywhere in the codebase.
+    A class is dead if its name never appears as a Name Load in any
+    scanned file — it is never instantiated, subclassed, used in
+    isinstance(), used as a type annotation, or imported.  Complements D1.
+
 F1  ``@dataclass`` fields never accessed as attributes anywhere in the
     codebase.  Uses the call-graph pass to collect all attribute accesses.
     Conservative: only flags fields whose name does not appear in any
@@ -55,6 +60,9 @@ _NEVER_DEAD = frozenset({
 })
 
 
+_NEEDS_CG_AND_AST = frozenset({"call_graph", "ast_forest"})
+
+
 def build_dead_code_detectors() -> list[Detector]:
     return [
         Detector("D1", "module-level function defined but never called in codebase", "open",
@@ -65,6 +73,8 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_d3, LOW, _NEEDS_AST),
         Detector("D4", "unreachable code after return/raise/break/continue", "open",
                  detect_d4, MEDIUM, _NEEDS_AST),
+        Detector("D5", "module-level class never referenced in codebase", "open",
+                 detect_d5, LOW, _NEEDS_CG_AND_AST),
         Detector("F1", "dataclass field never accessed as attribute in codebase", "open",
                  detect_f1, LOW, _NEEDS_CG),
         Detector("F2", "private module-level constant defined but never referenced", "open",
@@ -101,6 +111,55 @@ def detect_d1(context: AuditContext) -> DetectorResult:
         count += 1
         if len(samples) < _MAX_SAMPLES:
             samples.append(f"{name}() — defined but never called")
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D5 ────────────────────────────────────────────────────────────────────────
+
+def detect_d5(context: AuditContext) -> DetectorResult:
+    """Flag module-level classes never referenced anywhere in the codebase.
+
+    A class is dead if its name never appears as a Name Load (instantiation,
+    subclassing, isinstance(), type annotation, import) in any scanned file.
+    The call_graph's Name Load tracking captures all of these forms.
+
+    Skips:
+    - Private classes (name starts with ``_``)
+    - Classes exported via ``__all__``
+    - Test classes (name starts with ``Test``)
+    - Exception/Warning classes (name ends with Error/Exception/Warning/Fault)
+      Note: raised/caught exceptions DO appear as Name Loads, so these are
+      only excluded as a conservative hedge for exception hierarchies.
+    """
+    if (context.graph is None
+            or context.graph.call_graph is None
+            or context.graph.ast_forest is None):
+        return DetectorResult(count=0, samples=[])
+
+    cg = context.graph.call_graph
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        for stmt in tree.body:
+            if not isinstance(stmt, ast.ClassDef):
+                continue
+            name = stmt.name
+            if name.startswith("_"):
+                continue
+            if name in cg.defined_in_all:
+                continue
+            if name.startswith("Test"):
+                continue
+            if name.endswith(("Error", "Exception", "Warning", "Fault")):
+                continue
+            if name in cg.called_names:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(f"{rel}:{stmt.lineno}: class {name} — never referenced")
 
     return DetectorResult(count=count, samples=samples)
 

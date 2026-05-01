@@ -18,6 +18,11 @@ S2  Mutual imports — module A imports module B and module B imports module A
     Mutual imports almost always indicate a design problem: the two modules
     should be merged, or one should expose an interface the other depends on.
 
+S3  Test-only imports in production code — a ``src/`` file imports from a
+    ``tests.*`` or ``test_*`` module.  Test utilities should not leak into
+    production code; shared fixtures belong in a separate ``conftest.py``
+    or helper package inside ``src/``.
+
 Config example for S1::
 
     architecture:
@@ -36,6 +41,7 @@ Globs are matched against file paths relative to repo_root.
 """
 from __future__ import annotations
 
+import ast
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -48,6 +54,7 @@ if TYPE_CHECKING:
 
 _MAX_SAMPLES = 8
 _NEEDS = frozenset({"import_graph"})
+_NEEDS_AST = frozenset({"ast_forest"})
 
 
 def build_structure_detectors() -> list[Detector]:
@@ -56,6 +63,8 @@ def build_structure_detectors() -> list[Detector]:
                  MEDIUM, _NEEDS),
         Detector("S2", "mutual imports (direct circular dependencies)", "open", detect_s2,
                  LOW, _NEEDS),
+        Detector("S3", "test-only import in production code", "open", detect_s3,
+                 MEDIUM, _NEEDS_AST),
     ]
 
 
@@ -186,5 +195,48 @@ def detect_s2(context: AuditContext) -> DetectorResult:
                     path_a = graph.module_to_path.get(mod_a, Path(mod_a))
                     path_b = graph.module_to_path.get(mod_b, Path(mod_b))
                     samples.append(f"{path_a} ↔ {path_b}")
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── S3: test-only imports in production code ──────────────────────────────────
+
+def _is_test_module(name: str) -> bool:
+    """True if the top-level component of a module name is test-related."""
+    top = name.split(".")[0]
+    return top in {"tests", "test"} or top.startswith("test_")
+
+
+def detect_s3(context: AuditContext) -> DetectorResult:
+    """Flag production modules that import from test packages or test_* modules.
+
+    Test utilities must not leak into src/: shared helpers should live in
+    src/ or be exposed via conftest.py.
+    """
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            module_name: str | None = None
+            lineno: int = 0
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if _is_test_module(alias.name):
+                        module_name = alias.name
+                        lineno = node.lineno
+                        break
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and _is_test_module(node.module):
+                    module_name = node.module
+                    lineno = node.lineno
+            if module_name:
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(f"{rel}:{lineno}: imports {module_name!r}")
 
     return DetectorResult(count=count, samples=samples)

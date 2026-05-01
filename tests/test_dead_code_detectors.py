@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_f2
+from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_d5, detect_f2
 from custodian.audit_kit.passes.ast_forest import AstForest
 from custodian.audit_kit.passes.call_graph import build_call_graph
 
@@ -323,3 +323,79 @@ class TestD1:
         src = "import pytest\n\n@pytest.fixture\ndef my_fixture():\n    pass\n"
         ctx = _cg_context(tmp_path, src)
         assert detect_d1(ctx).count == 0
+
+
+# ── D5 helpers ────────────────────────────────────────────────────────────────
+
+def _d5_context(tmp_path: Path, src_text: str) -> AuditContext:
+    """Build an AuditContext with both call_graph and ast_forest populated."""
+    import ast as _ast
+    from custodian.audit_kit.passes.ast_forest import AstForest
+
+    src_root = tmp_path / "src"
+    src_root.mkdir(parents=True, exist_ok=True)
+    path = src_root / "module.py"
+    src_dedented = textwrap.dedent(src_text)
+    path.write_text(src_dedented, encoding="utf-8")
+
+    cg = build_call_graph(src_root)
+    forest = AstForest()
+    tree = _ast.parse(src_dedented)
+    forest.trees[path] = tree
+    forest.sources[path] = src_dedented
+
+    graph = AnalysisGraph(call_graph=cg, ast_forest=forest)
+    return AuditContext(
+        repo_root=tmp_path,
+        src_root=src_root,
+        tests_root=tmp_path / "tests",
+        config={},
+        plugin_modules=[],
+        graph=graph,
+    )
+
+
+class TestD5:
+    def test_unreferenced_class_flagged(self, tmp_path):
+        ctx = _d5_context(tmp_path, "class Orphan:\n    pass\n")
+        assert detect_d5(ctx).count == 1
+
+    def test_instantiated_class_not_flagged(self, tmp_path):
+        ctx = _d5_context(tmp_path, "class Used:\n    pass\nobj = Used()\n")
+        assert detect_d5(ctx).count == 0
+
+    def test_private_class_not_flagged(self, tmp_path):
+        ctx = _d5_context(tmp_path, "class _Internal:\n    pass\n")
+        assert detect_d5(ctx).count == 0
+
+    def test_test_class_not_flagged(self, tmp_path):
+        ctx = _d5_context(tmp_path, "class TestFoo:\n    pass\n")
+        assert detect_d5(ctx).count == 0
+
+    def test_exception_class_not_flagged(self, tmp_path):
+        ctx = _d5_context(tmp_path, "class FooError(Exception):\n    pass\n")
+        assert detect_d5(ctx).count == 0
+
+    def test_class_in_all_not_flagged(self, tmp_path):
+        src = '__all__ = ["MyClass"]\nclass MyClass:\n    pass\n'
+        ctx = _d5_context(tmp_path, src)
+        assert detect_d5(ctx).count == 0
+
+    def test_subclassed_class_not_flagged(self, tmp_path):
+        ctx = _d5_context(tmp_path, "class Base:\n    pass\nclass Child(Base):\n    pass\n")
+        # Base is referenced as a base class (Name Load); Child is unreferenced
+        result = detect_d5(ctx)
+        names = " ".join(result.samples)
+        assert "Base" not in names
+        assert "Child" in names
+
+    def test_no_graph_returns_zero(self, tmp_path):
+        ctx = AuditContext(
+            repo_root=tmp_path,
+            src_root=tmp_path / "src",
+            tests_root=tmp_path / "tests",
+            config={},
+            plugin_modules=[],
+            graph=None,
+        )
+        assert detect_d5(ctx).count == 0

@@ -159,6 +159,9 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C27", "assert False / assert 0 as permanent sentinel",  "open",     detect_c27,  LOW),
         Detector("C28", "hardcoded IP address in string literal",         "open",     detect_c28,  LOW),
         Detector("C29", "file exceeds line-count threshold",              "open",     detect_c29,  LOW),
+        Detector("C31", "weak hash algorithm (md5/sha1) without usedforsecurity=False",
+                                                                          "open",     detect_c31,  HIGH),
+        Detector("C32", "hardcoded credential in assignment",             "open",     detect_c32,  HIGH),
     ]
 
 
@@ -746,4 +749,136 @@ def detect_c16(context: AuditContext) -> DetectorResult:
             if len(samples) < _MAX_SAMPLES:
                 rel = path.relative_to(context.repo_root)
                 samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C31: weak hash algorithms ─────────────────────────────────────────────────
+
+def detect_c31(context: AuditContext) -> DetectorResult:
+    """Flag hashlib.md5() and hashlib.sha1() without usedforsecurity=False.
+
+    MD5 and SHA-1 are cryptographically broken and should not be used for
+    security-sensitive hashing (passwords, MACs, signatures).  If used only
+    for non-security purposes (checksums, caching keys), pass
+    ``usedforsecurity=False`` to suppress this finding and signal intent.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C31"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            # Match hashlib.md5(...) / hashlib.sha1(...)
+            if not (isinstance(func, ast.Attribute)
+                    and func.attr in ("md5", "sha1")
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "hashlib"):
+                continue
+            # Skip if usedforsecurity=False is present
+            has_flag = any(
+                kw.arg == "usedforsecurity"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is False
+                for kw in node.keywords
+            )
+            if has_flag:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{node.lineno}: hashlib.{func.attr}()")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C32: hardcoded credentials ────────────────────────────────────────────────
+
+_CREDENTIAL_NAMES = frozenset({
+    "password", "passwd", "pwd", "secret", "token",
+    "api_key", "apikey", "access_key", "private_key",
+    "client_secret", "auth_token", "signing_key", "service_key",
+    "credentials", "credential",
+})
+
+_PLACEHOLDER_RE = re.compile(
+    r"(?i)(your[-_]?|example|test[-_]?|dummy|fake|change[-_]?me|"
+    r"replace|placeholder|xxx+|yyy+|aaa+|\$\{|<[^>]+>|todo|fixme)"
+)
+
+
+def _is_credential_name(name: str) -> bool:
+    low = name.lower().rstrip("s")  # passwords → password
+    return low in _CREDENTIAL_NAMES or any(kw in low for kw in _CREDENTIAL_NAMES)
+
+
+def _is_real_credential(value: str) -> bool:
+    """Return True if value looks like an actual credential (not a placeholder)."""
+    if not value or len(value) < 4:
+        return False
+    if _PLACEHOLDER_RE.search(value):
+        return False
+    return True
+
+
+def detect_c32(context: AuditContext) -> DetectorResult:
+    """Flag assignments where a credential-named variable is set to a string literal.
+
+    Detects patterns like:
+        password = "actual_value"
+        self.api_key = "sk-..."
+        config = {"token": "live-secret"}
+
+    Skips obvious placeholders ("your-token-here", "example", etc.) and
+    very short values that are likely defaults or empty sentinels.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C32"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            # Variable assignments: password = "..."
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                    continue
+                for target in targets:
+                    name = None
+                    if isinstance(target, ast.Name):
+                        name = target.id
+                    elif isinstance(target, ast.Attribute):
+                        name = target.attr
+                    if name and _is_credential_name(name) and _is_real_credential(value.value):
+                        count += 1
+                        if len(samples) < _MAX_SAMPLES:
+                            samples.append(
+                                f"{rel}:{node.lineno}: {name} = {value.value[:20]!r}..."
+                                if len(value.value) > 20
+                                else f"{rel}:{node.lineno}: {name} = {value.value!r}"
+                            )
+            # Dict literals: {"password": "...", "token": "..."}
+            elif isinstance(node, ast.Dict):
+                for key, val in zip(node.keys, node.values):
+                    if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                        continue
+                    if not (isinstance(val, ast.Constant) and isinstance(val.value, str)):
+                        continue
+                    if _is_credential_name(key.value) and _is_real_credential(val.value):
+                        count += 1
+                        if len(samples) < _MAX_SAMPLES:
+                            samples.append(
+                                f"{rel}:{node.lineno}: dict key {key.value!r} = {val.value[:20]!r}..."
+                                if len(val.value) > 20
+                                else f"{rel}:{node.lineno}: dict key {key.value!r} = {val.value!r}"
+                            )
     return DetectorResult(count=count, samples=samples)

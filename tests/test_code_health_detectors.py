@@ -11,6 +11,7 @@ from custodian.audit_kit.code_health import (
     detect_c14, detect_c15, detect_c16, detect_c17, detect_c18,
     detect_c21, detect_c22, detect_c23, detect_c24, detect_c25,
     detect_c26, detect_c27, detect_c28, detect_c29,
+    detect_c31, detect_c32,
 )
 from custodian.audit_kit.detector import AuditContext
 
@@ -661,3 +662,67 @@ def test_c29_respects_custom_threshold(tmp_path):
         config={"audit": {"c29_threshold": 200}}, plugin_modules=[],
     )
     assert detect_c29(ctx).count == 1
+
+
+# ── C31: weak hash algorithms ─────────────────────────────────────────────────
+
+def test_c31_flags_md5_without_flag(tmp_path):
+    ctx = _ctx(tmp_path, "import hashlib\nhashlib.md5(data)\n")
+    assert detect_c31(ctx).count == 1
+
+
+def test_c31_flags_sha1_without_flag(tmp_path):
+    ctx = _ctx(tmp_path, "import hashlib\nhashlib.sha1(data)\n")
+    assert detect_c31(ctx).count == 1
+
+
+def test_c31_skips_md5_with_usedforsecurity_false(tmp_path):
+    ctx = _ctx(tmp_path, "import hashlib\nhashlib.md5(data, usedforsecurity=False)\n")
+    assert detect_c31(ctx).count == 0
+
+
+def test_c31_skips_sha256(tmp_path):
+    ctx = _ctx(tmp_path, "import hashlib\nhashlib.sha256(data)\n")
+    assert detect_c31(ctx).count == 0
+
+
+def test_c31_skips_non_hashlib_md5(tmp_path):
+    ctx = _ctx(tmp_path, "import foo\nfoo.md5(data)\n")
+    assert detect_c31(ctx).count == 0
+
+
+# ── C32: hardcoded credentials ────────────────────────────────────────────────
+
+def test_c32_flags_password_assignment(tmp_path):
+    ctx = _ctx(tmp_path, 'password = "supersecret"\n')
+    assert detect_c32(ctx).count == 1
+
+
+def test_c32_flags_api_key_assignment(tmp_path):
+    ctx = _ctx(tmp_path, 'api_key = "sk-abc123def456"\n')
+    assert detect_c32(ctx).count == 1
+
+
+def test_c32_flags_dict_token_key(tmp_path):
+    ctx = _ctx(tmp_path, 'cfg = {"token": "live-secret-value"}\n')
+    assert detect_c32(ctx).count == 1
+
+
+def test_c32_skips_placeholder_password(tmp_path):
+    ctx = _ctx(tmp_path, 'password = "your-password-here"\n')
+    assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_example_token(tmp_path):
+    ctx = _ctx(tmp_path, 'token = "example"\n')
+    assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_empty_password(tmp_path):
+    ctx = _ctx(tmp_path, 'password = ""\n')
+    assert detect_c32(ctx).count == 0
+
+
+def test_c32_skips_non_credential_name(tmp_path):
+    ctx = _ctx(tmp_path, 'username = "alice"\n')
+    assert detect_c32(ctx).count == 0
