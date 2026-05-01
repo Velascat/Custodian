@@ -164,6 +164,10 @@ def detect_d5(context: AuditContext) -> DetectorResult:
                 continue
             if name in cg.called_names:
                 continue
+            # Classes accessed via module alias (e.g. mod.ClassName) appear as
+            # attribute loads, not Name Loads — check both attr sets
+            if name in cg.called_attrs or name in cg.accessed_attrs:
+                continue
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 rel = path.relative_to(context.repo_root)
