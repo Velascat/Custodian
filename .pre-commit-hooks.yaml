@@ -1,0 +1,17 @@
+- id: custodian-audit
+  name: Custodian audit
+  language: python
+  entry: custodian-audit
+  args: ["--fail-on-findings", "--skip-deprecated", "--min-severity", "medium"]
+  pass_filenames: false
+  always_run: true
+  description: "Run Custodian audit; fail if any medium+ findings are present"
+
+- id: custodian-audit-high-only
+  name: Custodian audit (high severity only)
+  language: python
+  entry: custodian-audit
+  args: ["--fail-on-findings", "--skip-deprecated", "--min-severity", "high"]
+  pass_filenames: false
+  always_run: true
+  description: "Run Custodian audit; fail if any high-severity findings are present"

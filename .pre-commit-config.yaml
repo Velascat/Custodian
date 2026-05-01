@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: custodian-audit
+        name: Custodian audit (local dev)
+        language: python
+        entry: .venv/bin/custodian-audit
+        args: ["--fail-on-findings", "--skip-deprecated", "--min-severity", "medium", "--no-json"]
+        pass_filenames: false
+        always_run: true
