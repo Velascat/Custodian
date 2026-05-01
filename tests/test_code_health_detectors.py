@@ -471,6 +471,11 @@ def test_c18_flags_continuation_line(tmp_path):
     assert detect_c18(ctx).count == 1
 
 
+def test_c18_skips_list_element_quoted_f(tmp_path):
+    ctx = _ctx(tmp_path, 'ascenders = ["b", "d", "f", "h"]\n')
+    assert detect_c18(ctx).count == 0
+
+
 # ── C21: mutable default argument ────────────────────────────────────────────
 
 def test_c21_flags_list_default(tmp_path):

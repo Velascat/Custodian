@@ -456,7 +456,7 @@ def detect_c17(context: AuditContext) -> DetectorResult:
     return _count_pattern(_py_files(context, "C17"), _LEN_COMPARE_RE)
 
 
-_USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)f(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
+_USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)(?<!")(?<!')f(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
 
 _PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
 
