@@ -582,11 +582,16 @@ def detect_f3(context: AuditContext) -> DetectorResult:
         context.src_root, cg.model_validate_classes
     )
 
+    audit_cfg: dict = context.config.get("audit") or {}
+    exempt: set[str] = set(audit_cfg.get("f3_exempt") or [])
+
     samples: list[str] = []
     count = 0
 
     for name, class_names in sorted(field_map.items()):
         if name.startswith("_"):
+            continue
+        if name in exempt:
             continue
         if name in cg.accessed_attrs:
             continue
