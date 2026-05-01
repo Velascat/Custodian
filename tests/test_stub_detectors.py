@@ -225,3 +225,15 @@ class TestU3:
         """, tmp_path)
         result = detect_u3(_make_context(tmp_path, forest))
         assert result.count == 1
+
+    def test_except_handler_stub_excluded(self, tmp_path):
+        forest = _forest_from_source("""
+            try:
+                from real_lib import Foo
+            except Exception:
+                class Foo:
+                    def add(self, text: str) -> None:
+                        "No-op add."
+        """, tmp_path)
+        result = detect_u3(_make_context(tmp_path, forest))
+        assert result.count == 0

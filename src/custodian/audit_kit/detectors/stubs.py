@@ -112,6 +112,22 @@ def _protocol_classes(tree: ast.Module) -> set[str]:
     return names
 
 
+def _except_handler_functions(tree: ast.Module) -> set[int]:
+    """Return ids of FunctionDef nodes that live inside except-handler bodies.
+
+    try/except fallback stubs (e.g. ``except ImportError: class Foo: def add():...``)
+    are intentional no-ops, not unfinished implementations.
+    """
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        for child in ast.walk(ast.Module(body=node.body, type_ignores=[])):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                ids.add(id(child))
+    return ids
+
+
 def _containing_class(
     func: ast.FunctionDef | ast.AsyncFunctionDef,
     tree: ast.Module,
@@ -148,11 +164,14 @@ def _scan_functions(
 
     for path, tree, _src in context.graph.ast_forest.items():
         protocol_names = _protocol_classes(tree)
+        except_fn_ids = _except_handler_functions(tree)
 
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if _has_decorator(node, "abstractmethod", "overload"):
+                continue
+            if id(node) in except_fn_ids:
                 continue
             container = _containing_class(node, tree)
             if container and container.name in protocol_names:
