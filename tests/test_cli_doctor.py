@@ -2,17 +2,21 @@
 # Copyright (C) 2026 Velascat
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+_SRC_ROOT = str(Path(__file__).parent.parent / "src")
+
 
 def _run_doctor(repo: Path, *extra_args) -> subprocess.CompletedProcess:
+    env = {**os.environ, "PYTHONPATH": _SRC_ROOT}
     return subprocess.run(
         [sys.executable, "-m", "custodian.cli.doctor", "--repo", str(repo), *extra_args],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
 
 

@@ -11,7 +11,7 @@ import ast
 import textwrap
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.structure import detect_s1, detect_s2, detect_s3
+from custodian.audit_kit.detectors.structure import detect_a1, detect_s1, detect_s2, detect_s3
 from custodian.audit_kit.passes.ast_forest import AstForest
 from custodian.audit_kit.passes.import_graph import ImportGraph
 
@@ -250,3 +250,63 @@ class TestS3:
             graph=None,
         )
         assert detect_s3(ctx).count == 0
+
+
+# ── A1 tests ──────────────────────────────────────────────────────────────────
+
+class TestA1:
+    def _ctx(self, src: str, tmp_path: Path, config: dict) -> AuditContext:
+        src_root = tmp_path / "src"
+        src_root.mkdir(parents=True, exist_ok=True)
+        path = src_root / "myapp" / "domain" / "model.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        src = textwrap.dedent(src)
+        path.write_text(src, encoding="utf-8")
+        tree = ast.parse(src)
+        forest = AstForest()
+        forest.trees[path] = tree
+        forest.sources[path] = src
+        return AuditContext(
+            repo_root=tmp_path, src_root=src_root, tests_root=tmp_path / "tests",
+            config=config, plugin_modules=[],
+            graph=AnalysisGraph(ast_forest=forest),
+        )
+
+    def test_no_invariants_returns_zero(self, tmp_path):
+        ctx = self._ctx("x = 1\n", tmp_path, config={})
+        assert detect_a1(ctx).count == 0
+
+    def test_max_lines_ok(self, tmp_path):
+        ctx = self._ctx("x = 1\n", tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "small", "glob": "src/myapp/**/*.py", "max_lines": 100}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0
+
+    def test_max_lines_violation(self, tmp_path):
+        big_src = "\n".join(f"x{i} = {i}" for i in range(50))
+        ctx = self._ctx(big_src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "tiny", "glob": "src/myapp/**/*.py", "max_lines": 10}
+            ]}
+        })
+        assert detect_a1(ctx).count == 1
+
+    def test_max_classes_violation(self, tmp_path):
+        src = "\n".join(f"class C{i}: pass" for i in range(5))
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "few classes", "glob": "src/myapp/**/*.py", "max_classes": 3}
+            ]}
+        })
+        assert detect_a1(ctx).count == 1
+
+    def test_glob_not_matching_no_violation(self, tmp_path):
+        src = "\n".join(f"class C{i}: pass" for i in range(5))
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "only adapters", "glob": "src/adapters/**/*.py", "max_classes": 1}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0

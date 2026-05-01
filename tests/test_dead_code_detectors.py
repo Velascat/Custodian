@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_d5, detect_d6, detect_f2
+from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_d5, detect_d6, detect_f2, detect_f3
 from custodian.audit_kit.passes.ast_forest import AstForest
 from custodian.audit_kit.passes.call_graph import build_call_graph
 
@@ -516,3 +516,85 @@ class TestD6:
             graph=None,
         )
         assert detect_d6(ctx).count == 0
+
+
+# ── F3 tests ──────────────────────────────────────────────────────────────────
+
+class TestF3:
+    def _ctx(self, src: str, tmp_path: Path) -> AuditContext:
+        src_root = tmp_path / "src"
+        src_root.mkdir(parents=True, exist_ok=True)
+        path = src_root / "mod.py"
+        src = textwrap.dedent(src)
+        path.write_text(src, encoding="utf-8")
+        cg = build_call_graph(src_root)
+        return AuditContext(
+            repo_root=tmp_path, src_root=src_root, tests_root=tmp_path / "tests",
+            config={}, plugin_modules=[],
+            graph=AnalysisGraph(call_graph=cg),
+        )
+
+    def test_no_call_graph_returns_zero(self, tmp_path):
+        ctx = AuditContext(repo_root=tmp_path, src_root=tmp_path/"src", tests_root=tmp_path/"tests",
+                          config={}, plugin_modules=[], graph=AnalysisGraph(call_graph=None))
+        assert detect_f3(ctx).count == 0
+
+    def test_accessed_field_not_flagged(self, tmp_path):
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class Foo(BaseModel):
+    name: str
+def use(f: Foo):
+    return f.name
+""", tmp_path)
+        assert detect_f3(ctx).count == 0
+
+    def test_never_accessed_field_flagged(self, tmp_path):
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class Foo(BaseModel):
+    name: str
+    dead_field: int
+def use(f: Foo):
+    return f.name
+""", tmp_path)
+        result = detect_f3(ctx)
+        assert result.count == 1
+        assert "dead_field" in result.samples[0]
+
+    def test_kwarg_set_not_flagged(self, tmp_path):
+        # Setting via constructor kwarg counts as usage
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class Foo(BaseModel):
+    name: str
+f = Foo(name="hello")
+""", tmp_path)
+        assert detect_f3(ctx).count == 0
+
+    def test_private_field_not_flagged(self, tmp_path):
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class Foo(BaseModel):
+    _private: str
+""", tmp_path)
+        assert detect_f3(ctx).count == 0
+
+    def test_non_basemodel_not_flagged(self, tmp_path):
+        ctx = self._ctx("""
+class Foo:
+    dead_field: int
+""", tmp_path)
+        assert detect_f3(ctx).count == 0
+
+    def test_dynamic_getattr_self_not_flagged(self, tmp_path):
+        # getattr(self, key) where key is a variable — all fields implicitly live
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class Settings(BaseModel):
+    policy_path: str
+    timeout: int
+    def resolve(self, attr: str):
+        return getattr(self, attr)
+""", tmp_path)
+        assert detect_f3(ctx).count == 0

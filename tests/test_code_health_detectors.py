@@ -11,7 +11,7 @@ from custodian.audit_kit.code_health import (
     detect_c14, detect_c15, detect_c16, detect_c17, detect_c18,
     detect_c21, detect_c22, detect_c23, detect_c24, detect_c25,
     detect_c26, detect_c27, detect_c28, detect_c29,
-    detect_c31, detect_c32,
+    detect_c31, detect_c32, detect_c33,
 )
 from custodian.audit_kit.detector import AuditContext
 
@@ -746,3 +746,44 @@ def test_c32_skips_token_in_tokenizer_key(tmp_path):
 def test_c32_skips_token_endpoint_name(tmp_path):
     ctx = _ctx(tmp_path, 'token_endpoint = "https://example.com/oauth"\n')
     assert detect_c32(ctx).count == 0
+
+
+# ── C33: ghost-work comment density ──────────────────────────────────────────
+
+class TestC33:
+    def test_file_below_threshold_not_flagged(self, tmp_path):
+        # 4 markers — below default threshold of 5
+        src = "# TODO: fix a\n# TODO: fix b\n# FIXME: c\n# HACK: d\nx = 1\n"
+        ctx = _ctx(tmp_path, src)
+        assert detect_c33(ctx).count == 0
+
+    def test_file_at_threshold_flagged(self, tmp_path):
+        # 5 markers — at default threshold of 5, should be flagged (>=)
+        src = "# TODO: a\n# TODO: b\n# FIXME: c\n# HACK: d\n# XXX: e\nx = 1\n"
+        ctx = _ctx(tmp_path, src)
+        assert detect_c33(ctx).count == 1
+
+    def test_file_above_threshold_flagged(self, tmp_path):
+        # 6 markers — above default threshold
+        src = "# TODO: a\n# TODO: b\n# FIXME: c\n# HACK: d\n# XXX: e\n# TODO: f\nx = 1\n"
+        ctx = _ctx(tmp_path, src)
+        assert detect_c33(ctx).count == 1
+
+    def test_custom_threshold_respected(self, tmp_path):
+        # 3 markers — above custom threshold of 2
+        src = "# TODO: a\n# FIXME: b\n# HACK: c\nx = 1\n"
+        ctx = _ctx(tmp_path, src, config={"audit": {"c33_threshold": 2}})
+        assert detect_c33(ctx).count == 1
+
+    def test_custom_threshold_not_reached(self, tmp_path):
+        # 3 markers — below custom threshold of 10
+        src = "# TODO: a\n# FIXME: b\n# HACK: c\nx = 1\n"
+        ctx = _ctx(tmp_path, src, config={"audit": {"c33_threshold": 10}})
+        assert detect_c33(ctx).count == 0
+
+    def test_sample_mentions_file_and_count(self, tmp_path):
+        src = "# TODO: a\n# TODO: b\n# FIXME: c\n# HACK: d\n# XXX: e\nx = 1\n"
+        ctx = _ctx(tmp_path, src)
+        result = detect_c33(ctx)
+        assert result.count == 1
+        assert "5" in result.samples[0]

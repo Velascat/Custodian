@@ -50,6 +50,8 @@ class CallGraph:
     decorated_names: set[str] = field(default_factory=set)
     framework_decorated: set[str] = field(default_factory=set)
     constructed_names: set[str] = field(default_factory=set)
+    kw_arg_names: set[str] = field(default_factory=set)  # keyword arg names used in calls
+    dynamic_getattr_classes: set[str] = field(default_factory=set)  # classes with getattr(self, var) patterns
 
 
 def build_call_graph(src_root: Path, extra_roots: list[Path] | None = None) -> CallGraph:
@@ -87,6 +89,13 @@ def build_call_graph(src_root: Path, extra_roots: list[Path] | None = None) -> C
 def _collect_usages_only(tree: ast.Module, cg: CallGraph) -> None:
     """Collect only call sites and attribute accesses from extra (test) files."""
     for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    cg.constructed_names.add(base.id)
+                elif isinstance(base, ast.Attribute):
+                    cg.constructed_names.add(base.attr)
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name):
@@ -94,8 +103,28 @@ def _collect_usages_only(tree: ast.Module, cg: CallGraph) -> None:
                 cg.constructed_names.add(func.id)
             elif isinstance(func, ast.Attribute):
                 cg.called_attrs.add(func.attr)
+            elif isinstance(func, ast.Subscript) and isinstance(func.value, ast.Name):
+                cg.called_names.add(func.value.id)
+                cg.constructed_names.add(func.value.id)
+            # getattr(obj, "field") — string-based attribute access
+            if (
+                isinstance(func, ast.Name) and func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                cg.accessed_attrs.add(node.args[1].value)
+            # default_factory=ClassName, factory=ClassName etc. — class passed as callable
+            for kw in node.keywords:
+                if isinstance(kw.value, ast.Name):
+                    cg.constructed_names.add(kw.value.id)
+                if kw.arg:  # keyword arg name — Model(field=value) records "field"
+                    cg.kw_arg_names.add(kw.arg)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             cg.accessed_attrs.add(node.attr)
+            # ClassName.method(...) or EnumClass.MEMBER — treat as "class is in active use"
+            if isinstance(node.value, ast.Name):
+                cg.constructed_names.add(node.value.id)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             cg.called_names.add(node.id)
 
@@ -131,6 +160,29 @@ def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
                 elif isinstance(dec, ast.Attribute):
                     cg.decorated_names.add(dec.attr)
 
+    # Base class names — class Child(Base): means Base is actively used
+    # Also detect getattr(self, variable) — dynamic field access; all class fields are live
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    cg.constructed_names.add(base.id)
+                elif isinstance(base, ast.Attribute):
+                    cg.constructed_names.add(base.attr)
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Call):
+                    continue
+                func = child.func
+                if not (isinstance(func, ast.Name) and func.id == "getattr"):
+                    continue
+                if len(child.args) < 2:
+                    continue
+                receiver = child.args[0]
+                key = child.args[1]
+                if isinstance(receiver, ast.Name) and receiver.id == "self" and not isinstance(key, ast.Constant):
+                    cg.dynamic_getattr_classes.add(node.name)
+                    break
+
     # All call sites, attribute accesses, and bare name references
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -140,7 +192,28 @@ def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
                 cg.constructed_names.add(func.id)
             elif isinstance(func, ast.Attribute):
                 cg.called_attrs.add(func.attr)
+            elif isinstance(func, ast.Subscript) and isinstance(func.value, ast.Name):
+                # Generic parameterized constructor: ClassName[T, U](...) — treat as construction
+                cg.called_names.add(func.value.id)
+                cg.constructed_names.add(func.value.id)
+            # getattr(obj, "field") — string-based attribute access; treat as attribute read
+            if (
+                isinstance(func, ast.Name) and func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                cg.accessed_attrs.add(node.args[1].value)
+            # default_factory=ClassName, factory=ClassName etc. — class passed as callable
+            for kw in node.keywords:
+                if isinstance(kw.value, ast.Name):
+                    cg.constructed_names.add(kw.value.id)
+                if kw.arg:  # keyword arg name — Model(field=value) records "field"
+                    cg.kw_arg_names.add(kw.arg)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             cg.accessed_attrs.add(node.attr)
+            # ClassName.method(...) or EnumClass.MEMBER — treat as "class is in active use"
+            if isinstance(node.value, ast.Name):
+                cg.constructed_names.add(node.value.id)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             cg.called_names.add(node.id)

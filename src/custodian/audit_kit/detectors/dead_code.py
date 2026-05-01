@@ -38,6 +38,11 @@ D6  Module-level classes referenced (e.g. in type annotations or imports)
     as a constructor).  Does NOT flag classes not in called_names — D5
     covers that case.
 
+D7  A function/method parameter that is never referenced in the function
+    body.  Only checks regular params (not *args/**kwargs).  Skips self,
+    cls, underscore-prefixed params, functions with **kwargs (dynamic
+    forwarding), and stub bodies (abstractmethod, overload, pass/ellipsis).
+
 F1  ``@dataclass`` fields never accessed as attributes anywhere in the
     codebase.  Uses the call-graph pass to collect all attribute accesses.
     Conservative: only flags fields whose name does not appear in any
@@ -46,6 +51,11 @@ F1  ``@dataclass`` fields never accessed as attributes anywhere in the
 F2  Private module-level constant defined but never referenced in the same
     file.  Matches _ALL_CAPS names at module scope.  Names in ``__all__``
     are excluded (they may be imported by consumers).
+
+F3  Pydantic ``BaseModel`` / ``BaseSettings`` fields never accessed as
+    attributes anywhere in the codebase.  Uses the call-graph pass to
+    collect attribute accesses.  Skips private fields and classes that
+    expose all fields via serialization methods (model_dump/dict/to_dict).
 """
 from __future__ import annotations
 
@@ -86,8 +96,12 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_d5, LOW, _NEEDS_CG_AND_AST),
         Detector("D6", "class defined but never instantiated (constructor never called)", "open",
                  detect_d6, LOW, _NEEDS_CG_AND_AST),
+        Detector("D7", "method parameter defined but never used in function body", "open",
+                 detect_d7, LOW, _NEEDS_AST),
         Detector("F1", "dataclass field never accessed as attribute in codebase", "open",
                  detect_f1, LOW, _NEEDS_CG),
+        Detector("F3", "BaseModel field never accessed as attribute in codebase", "open",
+                 detect_f3, LOW, _NEEDS_CG),
         Detector("F2", "private module-level constant defined but never referenced", "open",
                  detect_f2, LOW, _NEEDS_AST),
     ]
@@ -125,6 +139,11 @@ def detect_d1(context: AuditContext) -> DetectorResult:
 
     return DetectorResult(count=count, samples=samples)
 
+
+_D5_D6_SKIP_BASES = frozenset({
+    "Protocol", "ABC",          # structural typing / abstract
+    "BaseModel", "BaseSettings", "TypedDict",  # Pydantic — deserialized, not constructed directly
+})
 
 # ── D5 ────────────────────────────────────────────────────────────────────────
 
@@ -165,11 +184,9 @@ def detect_d5(context: AuditContext) -> DetectorResult:
                 continue
             if name.endswith(("Error", "Exception", "Warning", "Fault")):
                 continue
-            # Protocol subclasses are structural interfaces used only as type
-            # annotations; with PEP 563 lazy evaluation those refs aren't Name Loads
             if any(
-                (isinstance(b, ast.Name) and b.id in {"Protocol", "ABC"})
-                or (isinstance(b, ast.Attribute) and b.attr in {"Protocol", "ABC"})
+                (isinstance(b, ast.Name) and b.id in _D5_D6_SKIP_BASES)
+                or (isinstance(b, ast.Attribute) and b.attr in _D5_D6_SKIP_BASES)
                 for b in stmt.bases
             ):
                 continue
@@ -226,8 +243,8 @@ def detect_d6(context: AuditContext) -> DetectorResult:
             if name.endswith(("Error", "Exception", "Warning", "Fault")):
                 continue
             if any(
-                (isinstance(b, ast.Name) and b.id in {"Protocol", "ABC"})
-                or (isinstance(b, ast.Attribute) and b.attr in {"Protocol", "ABC"})
+                (isinstance(b, ast.Name) and b.id in _D5_D6_SKIP_BASES)
+                or (isinstance(b, ast.Attribute) and b.attr in _D5_D6_SKIP_BASES)
                 for b in stmt.bases
             ):
                 continue
@@ -242,6 +259,112 @@ def detect_d6(context: AuditContext) -> DetectorResult:
                 samples.append(
                     f"{rel}:{stmt.lineno}: class {name} — never constructed (referenced in annotations/imports only)"
                 )
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D7 ────────────────────────────────────────────────────────────────────────
+
+def _is_stub_body(body: list[ast.stmt]) -> bool:
+    """True if the function body is a stub (pass, ellipsis, raise NotImplementedError, or docstring-only)."""
+    if not body:
+        return True
+    s = body[0]
+    # Pure ellipsis: ...
+    if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is ...:
+        return True
+    # Docstring-only or docstring + ellipsis/pass
+    if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and isinstance(s.value.value, str):
+        rest = body[1:]
+        if not rest:
+            return True
+        if len(rest) == 1:
+            r = rest[0]
+            if isinstance(r, ast.Expr) and isinstance(r.value, ast.Constant) and r.value.value is ...:
+                return True
+            if isinstance(r, ast.Pass):
+                return True
+            if _is_raise_not_implemented(r):
+                return True
+    if len(body) == 1 and isinstance(body[0], ast.Pass):
+        return True
+    # raise NotImplementedError(...) — unimplemented stub
+    if len(body) == 1 and _is_raise_not_implemented(body[0]):
+        return True
+    return False
+
+
+def _is_raise_not_implemented(stmt: ast.stmt) -> bool:
+    """True if *stmt* is ``raise NotImplementedError(...)`` or ``raise NotImplementedError``."""
+    if not isinstance(stmt, ast.Raise) or stmt.exc is None:
+        return False
+    exc = stmt.exc
+    # raise NotImplementedError
+    if isinstance(exc, ast.Name) and exc.id == "NotImplementedError":
+        return True
+    # raise NotImplementedError(...)
+    if (isinstance(exc, ast.Call)
+            and isinstance(exc.func, ast.Name)
+            and exc.func.id == "NotImplementedError"):
+        return True
+    return False
+
+
+def detect_d7(context: AuditContext) -> DetectorResult:
+    """Flag function/method parameters that are never referenced in the function body."""
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # Skip stubs: abstractmethod, overload, override decorators
+            if _has_decorator(node, "abstractmethod", "overload", "override"):
+                continue
+            # Skip stub bodies
+            if _is_stub_body(node.body):
+                continue
+            # Skip dunder methods — params are protocol-required (__exit__, __getitem__, etc.)
+            if node.name.startswith("__") and node.name.endswith("__"):
+                continue
+            # Skip functions with **kwargs (dynamic forwarding pattern)
+            if node.args.kwarg is not None:
+                continue
+            # Collect all regular params (not *args / **kwargs)
+            params = (
+                node.args.posonlyargs
+                + node.args.args
+                + node.args.kwonlyargs
+            )
+            # Filter out self, cls, and underscore-prefixed params
+            checkable = [
+                arg for arg in params
+                if arg.arg not in ("self", "cls") and not arg.arg.startswith("_")
+            ]
+            if not checkable:
+                continue
+            # Collect all Name Load/Del nodes in the function body
+            # del var counts as intentional acknowledgement of the param
+            used_names: set[str] = set()
+            for stmt in node.body:
+                for n in ast.walk(stmt):
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Load, ast.Del)):
+                        used_names.add(n.id)
+            # Flag params not appearing as Name Loads in the body
+            for arg in checkable:
+                if arg.arg not in used_names:
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        lineno = getattr(arg, "lineno", node.lineno)
+                        samples.append(
+                            f"{rel}:{lineno}: "
+                            f"{node.name}() — parameter '{arg.arg}' never used"
+                        )
 
     return DetectorResult(count=count, samples=samples)
 
@@ -309,9 +432,113 @@ def detect_f1(context: AuditContext) -> DetectorResult:
             continue
         if name in cg.accessed_attrs:
             continue
+        if name in cg.kw_arg_names:  # set via SomeClass(field=value) — still in use
+            continue
         count += 1
         if len(samples) < _MAX_SAMPLES:
             samples.append(f"{name} — dataclass field never accessed as attribute")
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── F3 ────────────────────────────────────────────────────────────────────────
+
+_PYDANTIC_BASES = frozenset({"BaseModel", "BaseSettings"})
+_PYDANTIC_VALIDATOR_DECORATORS = frozenset({"validator", "field_validator", "model_validator"})
+
+
+def _pydantic_field_names(src_root: Path) -> dict[str, set[str]]:
+    """Collect annotated field names from BaseModel/BaseSettings subclasses.
+
+    Returns a mapping of field_name → set of class names that declare it.
+
+    Skips:
+    - Classes with serialization methods (model_dump/dict/to_dict) — all fields
+      exposed indirectly via serialization.
+    - Private fields (starting with ``_``).
+    - Fields that are decorated (validators, class methods, etc.).
+    """
+    fields: dict[str, set[str]] = {}
+    for path in sorted(src_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            # Only consider direct BaseModel/BaseSettings subclasses
+            if not any(
+                (isinstance(b, ast.Name) and b.id in _PYDANTIC_BASES)
+                or (isinstance(b, ast.Attribute) and b.attr in _PYDANTIC_BASES)
+                for b in node.bases
+            ):
+                continue
+            # Skip classes that expose all fields via serialization
+            method_names = {
+                stmt.name
+                for stmt in node.body
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if method_names & _SERIALIZATION_METHODS:
+                continue
+            # Collect decorated names (validators) to skip
+            decorated_names: set[str] = set()
+            for stmt in node.body:
+                if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for dec in stmt.decorator_list:
+                    dec_name = (
+                        dec.id if isinstance(dec, ast.Name)
+                        else dec.attr if isinstance(dec, ast.Attribute)
+                        else dec.func.id if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name)
+                        else dec.func.attr if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)
+                        else None
+                    )
+                    if dec_name in _PYDANTIC_VALIDATOR_DECORATORS:
+                        decorated_names.add(stmt.name)
+            # Collect AnnAssign fields (Pydantic v2 style)
+            for stmt in node.body:
+                if not isinstance(stmt, ast.AnnAssign):
+                    continue
+                if not isinstance(stmt.target, ast.Name):
+                    continue
+                name = stmt.target.id
+                if name.startswith("_"):
+                    continue
+                if name in decorated_names:
+                    continue
+                fields.setdefault(name, set()).add(node.name)
+    return fields
+
+
+def detect_f3(context: AuditContext) -> DetectorResult:
+    """Flag Pydantic BaseModel/BaseSettings fields never accessed as attributes."""
+    if context.graph is None or context.graph.call_graph is None:
+        return DetectorResult(count=0, samples=[])
+
+    cg = context.graph.call_graph
+    field_map = _pydantic_field_names(context.src_root)  # field_name → set of class names
+
+    samples: list[str] = []
+    count = 0
+
+    for name, class_names in sorted(field_map.items()):
+        if name.startswith("_"):
+            continue
+        if name in cg.accessed_attrs:
+            continue
+        if name in cg.kw_arg_names:  # set via Model(field=value) — still in use
+            continue
+        # Skip fields from classes that use getattr(self, variable) — dynamic access
+        if class_names & cg.dynamic_getattr_classes:
+            continue
+        count += 1
+        if len(samples) < _MAX_SAMPLES:
+            samples.append(f"{name} — BaseModel field never accessed as attribute")
 
     return DetectorResult(count=count, samples=samples)
 

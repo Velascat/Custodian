@@ -25,7 +25,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset({
 })
 _KNOWN_AUDIT_KEYS = frozenset({
     "exclude_paths", "stale_handlers", "common_words",
-    "x1_threshold", "x2_threshold", "c29_threshold",
+    "x1_threshold", "x2_threshold", "c29_threshold", "c33_threshold",
     # plugin-extension keys (plugins may declare arbitrary audit sub-keys)
     "plugin_audit_keys",
 })

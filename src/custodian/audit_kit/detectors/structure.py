@@ -8,6 +8,12 @@ a single file.
 
 Detectors
 ─────────
+A1  Architecture invariants — declarative YAML rules enforcing structural
+    constraints per file/glob.  Rules are expressed in ``.custodian.yaml``
+    under ``architecture.invariants``.  Each rule may enforce one of:
+    max_lines, max_classes, max_functions, or forbidden_import.  If no
+    invariants are declared the detector silently reports 0 findings.
+
 S1  Layer boundary violations — files in a declared layer import from a
     layer they are forbidden to depend on.  Rules are expressed in
     ``.custodian.yaml`` under ``architecture.layers``.  If no rules are
@@ -59,6 +65,8 @@ _NEEDS_AST = frozenset({"ast_forest"})
 
 def build_structure_detectors() -> list[Detector]:
     return [
+        Detector("A1", "architecture invariant violation (max_lines/max_classes/forbidden_import)", "open",
+                 detect_a1, MEDIUM, _NEEDS_AST),
         Detector("S1", "architecture layer boundary violations", "open", detect_s1,
                  MEDIUM, _NEEDS),
         Detector("S2", "mutual imports (direct circular dependencies)", "open", detect_s2,
@@ -88,6 +96,106 @@ def _parse_layer_rules(config: dict) -> list[dict]:
     """Return the list of layer rule dicts from config, or []."""
     arch = config.get("architecture") or {}
     return list(arch.get("layers") or [])
+
+
+def _parse_invariants(config: dict) -> list[dict]:
+    """Return the list of architecture invariant dicts from config, or []."""
+    arch = config.get("architecture") or {}
+    return list(arch.get("invariants") or [])
+
+
+# ── A1: architecture invariants ──────────────────────────────────────────────
+
+def detect_a1(context: AuditContext) -> DetectorResult:
+    """Flag files that violate declared architecture invariants.
+
+    Rules are declared in .custodian.yaml under architecture.invariants.
+    Each rule applies to files matching its glob and checks one constraint:
+    max_lines, max_classes, max_functions, or forbidden_import.
+    If no invariants are declared, silently returns 0 findings.
+    """
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    invariants = _parse_invariants(context.config)
+    if not invariants:
+        return DetectorResult(count=0, samples=[])
+
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, src in context.graph.ast_forest.items():
+        rel = path.relative_to(context.repo_root)
+        rel_str = rel.as_posix()  # noqa: F841 — available for debug if needed
+
+        for rule in invariants:
+            glob = rule.get("glob") or ""
+            if not glob or not _glob_match(rel, glob):
+                continue
+            name = rule.get("name") or glob
+
+            # max_lines
+            if "max_lines" in rule:
+                limit = int(rule["max_lines"])
+                actual = len(src.splitlines())
+                if actual > limit:
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(
+                            f"{rel}:{actual} lines — exceeds {name!r} limit of {limit}"
+                        )
+
+            # max_classes
+            if "max_classes" in rule:
+                limit = int(rule["max_classes"])
+                actual = sum(1 for n in ast.walk(tree) if isinstance(n, ast.ClassDef))
+                if actual > limit:
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(
+                            f"{rel}:{actual} classes — exceeds {name!r} limit of {limit}"
+                        )
+
+            # max_functions (module-level only)
+            if "max_functions" in rule:
+                limit = int(rule["max_functions"])
+                actual = sum(
+                    1 for s in tree.body
+                    if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))
+                )
+                if actual > limit:
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(
+                            f"{rel}:{actual} functions — exceeds {name!r} limit of {limit}"
+                        )
+
+            # forbidden_import
+            if "forbidden_import" in rule:
+                pattern = rule["forbidden_import"]
+                # Convert dot-separated module pattern to path-style for _glob_match
+                path_pattern = pattern.replace(".", "/")
+                for node in ast.walk(tree):
+                    mod = None
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            mod_as_path = alias.name.replace(".", "/")
+                            if _glob_match(Path(mod_as_path), path_pattern):
+                                mod = alias.name
+                                break
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        mod_as_path = node.module.replace(".", "/")
+                        if _glob_match(Path(mod_as_path), path_pattern):
+                            mod = node.module
+                    if mod:
+                        count += 1
+                        if len(samples) < _MAX_SAMPLES:
+                            samples.append(
+                                f"{rel}:{node.lineno}: imports {mod!r} — forbidden by {name!r}"
+                            )
+                        break  # one violation per rule per file is enough
+
+    return DetectorResult(count=count, samples=samples)
 
 
 # ── S1: layer boundary violations ────────────────────────────────────────────

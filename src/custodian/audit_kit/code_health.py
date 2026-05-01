@@ -162,6 +162,7 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C31", "weak hash algorithm (md5/sha1) without usedforsecurity=False",
                                                                           "open",     detect_c31,  HIGH),
         Detector("C32", "hardcoded credential in assignment",             "open",     detect_c32,  HIGH),
+        Detector("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open", detect_c33, LOW),
     ]
 
 
@@ -920,4 +921,36 @@ def detect_c32(context: AuditContext) -> DetectorResult:
                                 if len(val.value) > 20
                                 else f"{rel}:{node.lineno}: dict key {key.value!r} = {val.value!r}"
                             )
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C33: ghost-work comment density ──────────────────────────────────────────
+
+_GHOST_MARKER_RE = re.compile(r"#[^\n]*\b(TODO|FIXME|HACK|XXX|NOCOMMIT)\b", re.IGNORECASE)
+
+
+def detect_c33(context: AuditContext) -> DetectorResult:
+    """Flag files with a high density of ghost-work comment markers.
+
+    Counts # TODO / FIXME / HACK / XXX / NOCOMMIT per file. Files at or
+    above the threshold are flagged with their total count. The threshold
+    is configurable via audit.c33_threshold in .custodian.yaml (default 5).
+    """
+    audit_cfg = context.config.get("audit") or {}
+    threshold = int(audit_cfg.get("c33_threshold") or 5)
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C33"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        markers = _GHOST_MARKER_RE.findall(text)
+        if len(markers) >= threshold:
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(
+                    f"{rel} — {len(markers)} ghost markers (TODO/FIXME/HACK/XXX)"
+                )
     return DetectorResult(count=count, samples=samples)
