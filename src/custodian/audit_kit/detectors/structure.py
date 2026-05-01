@@ -374,20 +374,27 @@ def detect_s4(context: AuditContext) -> DetectorResult:
     if tests_root is None or not tests_root.is_dir():
         return DetectorResult(count=0, samples=[])
 
+    # Check both tests_root/conftest.py and repo_root/conftest.py — some repos
+    # put the guard at the project root when pytest rootdir is the repo root.
+    candidates = [tests_root / "conftest.py", context.repo_root / "conftest.py"]
+    for candidate in candidates:
+        if candidate.exists():
+            try:
+                content = candidate.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if any(marker in content for marker in _VENV_GUARD_MARKERS):
+                return DetectorResult(count=0, samples=[])
+
+    # Neither candidate has a guard
     conftest = tests_root / "conftest.py"
     if not conftest.exists():
-        rel = str(conftest.relative_to(context.repo_root))
-        return DetectorResult(count=1, samples=[f"{rel}: file missing — add conftest.py with venv guard"])
+        root_conftest = context.repo_root / "conftest.py"
+        if not root_conftest.exists():
+            rel = str(conftest.relative_to(context.repo_root))
+            return DetectorResult(count=1, samples=[f"{rel}: file missing — add conftest.py with venv guard"])
 
-    try:
-        content = conftest.read_text(encoding="utf-8")
-    except OSError:
-        return DetectorResult(count=0, samples=[])
-
-    if any(marker in content for marker in _VENV_GUARD_MARKERS):
-        return DetectorResult(count=0, samples=[])
-
-    rel = str(conftest.relative_to(context.repo_root))
+    rel = str(conftest.relative_to(context.repo_root)) if conftest.exists() else "conftest.py"
     return DetectorResult(
         count=1,
         samples=[f"{rel}: no venv guard — add sys.prefix / _EXPECTED_VENV check"],
