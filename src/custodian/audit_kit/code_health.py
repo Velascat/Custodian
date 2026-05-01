@@ -238,7 +238,13 @@ _BROAD_EXCEPT_RE = re.compile(
     r"^\s+except\s+(?:Exception|BaseException)\s*(?:as\s+\w+)?\s*:",
     re.MULTILINE,
 )
-_LOGGER_CALL_RE = re.compile(r"\blogger\s*\.\s*\w+\s*\(|logging\s*\.\s*\w+\s*\(")
+_LOGGER_CALL_RE = re.compile(
+    r"\blogger\s*\.\s*\w+\s*\("          # logger.xxx(
+    r"|logging\s*\.\s*\w+\s*\("          # logging.xxx(
+    r"|\)\s*\.\s*(?:warning|error|exception|critical|warn)\s*\("  # x().warning( — chained calls
+    r"|\b\w+_logger\s*\(\s*\)\s*\."      # _get_foo_logger().
+    r"|\b\w+\s*\.\s*(?:exception|critical)\s*\("  # any.exception/critical( — almost exclusively logging
+)
 _RAISE_RE = re.compile(r"^\s+raise\b", re.MULTILINE)
 
 
