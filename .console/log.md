@@ -70,33 +70,41 @@
 
 ## Coverage map
 
-**What Custodian covers:**
-- Dead code: D1–D6 (functions, classes, branches, unreachable code, fields, partially-implemented pipelines)
-- Partially implemented: U1–U3 (stub bodies), D6 (referenced but never constructed), G1 (ghost CamelCase names)
-- Structure: S1 (layer violations), S2 (circular imports), S3 (test import in src)
-- Code health: C1–C32 (file-local quality, security, complexity)
+**What Custodian covers (63 detectors):**
+- Dead code: D1–D7 (functions, classes, branches, unreachable code, fields, partially-implemented pipelines, dead method params)
+- Partially implemented: U1–U3 (stub bodies), D6 (referenced but never constructed), G1 (ghost CamelCase names in comments)
+- Structure: S1 (import layer violations), S2 (circular imports), S3 (test import in src)
+- Architecture invariants: A1 (declarative YAML max_lines/max_classes/max_functions/forbidden_import per glob)
+- Code health: C1–C33 (file-local quality, security, complexity, ghost-work density)
+- Dead fields: F1 (dataclass fields), F2 (module-level constants), F3 (Pydantic BaseModel/BaseSettings fields)
 - Test shape: T1 (no tests), T2 (no assertions)
-- Annotations: E1, E2 (missing type hints)
-- Imports: I1 (unused)
+- Annotations: E1 (missing return type), E2 (missing param types)
+- Imports: I1 (unused imports)
 - Complexity: X1 (cyclomatic), X2 (too many params)
 
 **What's NOT in Custodian:**
 
 | Gap area | Priority | Notes |
 |---|---|---|
-| Pydantic field liveness (F3) | ✅ DONE | F3 live: checks BaseModel/BaseSettings fields via call_graph |
-| Architecture invariants (A1) | ✅ DONE | A1 live: declarative YAML max_lines/max_classes/forbidden_import |
-| Dead method parameters (D7) | ✅ DONE | D7 live: AST-based param usage check |
-| Ghost work comments (C33) | ✅ DONE | C33 live: per-file TODO/FIXME/HACK/XXX density |
 | Protocol contract (P1) | MEDIUM | U1-U3 catch stub shape but don't verify signature matches Protocol |
-| Ghost work comments (C33) | MEDIUM | TODO/FIXME/HACK density not tracked |
+| Naming conventions (N1) | LOW | No is_/has_/can_ bool-func prefix enforcement — AST-based, feasible |
+| C30: random outside tests | LOW | Prefer secrets for security-sensitive code |
 | Flow audits | LOW | No reachability, no missing-error-path, no constant-return analysis |
 | Pipeline completeness | LOW | No "producer → consumer" graph across stages |
 | Config key liveness | LOW | String subscript `config["key"]` invisible to call_graph |
-| Naming conventions (N1) | LOW | No is_/has_ bool-func prefix enforcement |
+| Feature flag liveness | LOW | No unused/always-true flag detection |
 | Documentation drift | STOP | Needs docstring parser; complex |
 | Duplicate code | STOP | Needs hash/similarity pass; complex |
 | Resource lifecycle | STOP | No unclosed file/connection detection |
+
+**Known Custodian limitations (not gaps — won't fix):**
+- D1: module-level only; method-level dead detection needs type info (too many false positives)
+- D1: module attribute monkey-patching (`mod.fn = wrapper`) is attribute access, not a call — workaround: `__all__`
+- D1: per-file exclude_paths doesn't work; call_graph has no file context — would need `(file, name)` pairs
+- D5/D6: string-based class factory (`"module.ClassName"` in registry dict) — can't trace statically
+- C23: regex matches "shell=True" in docstrings — fix would require AST-based C23
+- I1: multi-line `from x import (\n  a, b\n)` — lineno points to first line only, b not caught
+- VF D7=35: all keyword-only params (after `*`) — can't rename with `_` without breaking callers
 
 ## Stop Points
 
