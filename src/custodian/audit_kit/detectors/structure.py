@@ -178,10 +178,9 @@ def detect_a1(context: AuditContext) -> DetectorResult:
                             f"{rel}:{actual} functions — exceeds {name!r} limit of {limit}"
                         )
 
-            # forbidden_import
+            # forbidden_import — glob match against dotted module path (dots → slashes)
             if "forbidden_import" in rule:
                 pattern = rule["forbidden_import"]
-                # Convert dot-separated module pattern to path-style for _glob_match
                 path_pattern = pattern.replace(".", "/")
                 for node in ast.walk(tree):
                     mod = None
@@ -200,6 +199,32 @@ def detect_a1(context: AuditContext) -> DetectorResult:
                         if len(samples) < _MAX_SAMPLES:
                             samples.append(
                                 f"{rel}:{node.lineno}: imports {mod!r} — forbidden by {name!r}"
+                            )
+                        break  # one violation per rule per file is enough
+
+            # forbidden_import_prefix — prefix match (exact or sub-module).
+            # Use this instead of forbidden_import when you want to catch both
+            # `import foo` and `from foo.bar import baz` with a single rule.
+            if "forbidden_import_prefix" in rule:
+                prefix = rule["forbidden_import_prefix"]
+                prefix_path = prefix.replace(".", "/")
+                for node in ast.walk(tree):
+                    mod = None
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            mp = alias.name.replace(".", "/")
+                            if mp == prefix_path or mp.startswith(prefix_path + "/"):
+                                mod = alias.name
+                                break
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        mp = node.module.replace(".", "/")
+                        if mp == prefix_path or mp.startswith(prefix_path + "/"):
+                            mod = node.module
+                    if mod:
+                        count += 1
+                        if len(samples) < _MAX_SAMPLES:
+                            samples.append(
+                                f"{rel}:{node.lineno}: imports {mod!r} — forbidden prefix {prefix!r}"
                             )
                         break  # one violation per rule per file is enough
 
