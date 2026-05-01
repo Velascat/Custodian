@@ -50,11 +50,20 @@ def run_repo_audit(
     """
     config = load_config(repo_root)
     sys.path.insert(0, str(repo_root))
+    # Flush any _custodian.* modules cached from a previous repo so this
+    # repo's plugin package is imported fresh.
+    _cached = [k for k in sys.modules if k == "_custodian" or k.startswith("_custodian.")]
+    _saved = {k: sys.modules.pop(k) for k in _cached}
     try:
         plugins   = load_plugins(config)
         extra     = load_detectors(config)
     finally:
         sys.path.remove(str(repo_root))
+        # Remove this repo's _custodian modules and restore any previously cached ones
+        for k in list(sys.modules):
+            if k == "_custodian" or k.startswith("_custodian."):
+                sys.modules.pop(k, None)
+        sys.modules.update(_saved)
 
     src_root   = repo_root / config.get("src_root", "src")
     tests_root = repo_root / config.get("tests_root", "tests")
