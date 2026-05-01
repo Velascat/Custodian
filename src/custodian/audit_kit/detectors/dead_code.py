@@ -363,12 +363,17 @@ def detect_d7(context: AuditContext) -> DetectorResult:
                 for n in ast.walk(stmt):
                     if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Load, ast.Del)):
                         used_names.add(n.id)
+            src_lines = _src.splitlines()
             # Flag params not appearing as Name Loads in the body
             for arg in checkable:
                 if arg.arg not in used_names:
+                    lineno = getattr(arg, "lineno", node.lineno)
+                    # Respect # noqa: ARG002 / # noqa: D7 on the parameter line
+                    line = src_lines[lineno - 1] if 0 < lineno <= len(src_lines) else ""
+                    if "noqa" in line:
+                        continue
                     count += 1
                     if len(samples) < _MAX_SAMPLES:
-                        lineno = getattr(arg, "lineno", node.lineno)
                         samples.append(
                             f"{rel}:{lineno}: "
                             f"{node.name}() — parameter '{arg.arg}' never used"
