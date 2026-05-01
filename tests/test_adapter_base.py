@@ -96,6 +96,19 @@ class TestFilterFindings:
         assert result[0].path == "src/bar.py"
 
 
+class TestFindTool:
+    def test_returns_path_when_in_venv(self):
+        from custodian.adapters.base import find_tool
+        # ruff is always installed in dev; find_tool should locate it
+        result = find_tool("ruff")
+        assert result is not None
+        assert "ruff" in result
+
+    def test_returns_none_for_nonexistent_tool(self):
+        from custodian.adapters.base import find_tool
+        assert find_tool("__tool_that_does_not_exist_xyz__") is None
+
+
 class TestGetEnabledAdapters:
     def test_empty_config_returns_no_adapters(self):
         from custodian.adapters.registry import get_enabled_adapters
