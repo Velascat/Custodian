@@ -3,6 +3,9 @@
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| All 15 Custodian refactor phases complete | Phases 4-15 implemented in one session: Semgrep/ty/mypy/Vulture adapters, policy layer, codemod base, config migration, JSON/SARIF/Markdown reports, integration tests, deprecated detector cleanup, unified CLI, pre-commit hooks, multi-repo enhancements. 475 tests. | 2026-05-01 |
+| S4 detector: missing venv guard in tests/conftest.py | Repeatedly having to add venv guard manually; made it a detector so Custodian flags repos that are missing it | 2026-05-01 |
+| Deprecated detectors stubbed not deleted | 27 detect_* functions replaced with stubs returning (0,[]); Detector registrations kept for --list-detectors to show them with deprecated=True status | 2026-05-01 |
 |----------|-----------|------|
 | F3 skips classes deserialized via model_validate*() | ClassName.model_validate*() calls mean all fields are part of the external schema; not dead even if not accessed as Python attributes | 2026-05-01 |
 | F3 transitively expands model_validate_classes | Pydantic inflates nested models automatically during deserialization; a field typed as NestedModel in a deserialized class means NestedModel's fields are also schema fields | 2026-05-01 |

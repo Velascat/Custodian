@@ -4,27 +4,26 @@
 
 _(none)_
 
-## Refactor — Master Phase List (Custodian → Orchestration Engine)
+## Refactor — Master Phase List ✅ ALL 15 PHASES COMPLETE
 
-Architecture is locked. Custodian becomes orchestrator + policy engine; detection delegates to Ruff, Semgrep, ty, Vulture.
-Design artifact: `docs/design/detector_disposition_matrix.md` (committed 984c000)
+**Phase 0** ✅ Detector disposition matrix (984c000)
+**Phase 1** ✅ Finding model, ToolAdapter ABC, runner.py, package stubs (caadf29)
+**Phase 2** ✅ Ruff adapter — JSON parsing, severity prefix map, 23 tests (b5794a0)
+**Phase 3** ✅ Deprecated detector flags, --skip-deprecated CLI flag (b5794a0)
+**Phase 4** ✅ Semgrep adapter — JSON output parsing, 23 tests (3d8a3cb)
+**Phase 5** ✅ Policy layer — apply_policy(), architecture boundary checks (f69db99)
+**Phase 6** ✅ ty adapter (concise format) + mypy adapter (fallback), 28 tests (541e374)
+**Phase 7** ✅ Vulture adapter — advisory dead-code, confidence threshold, 18 tests (7187d04)
+**Phase 8** ✅ Codemod base — Codemod ABC, run_codemods(), custodian-fix CLI (ebcd026)
+**Phase 9** ✅ Config migration — dual-schema loader, DeprecationWarning, custodian-config CLI (0de95cf)
+**Phase 10** ✅ Reports — JSON/SARIF/Markdown builders, 25 tests (36230ee)
+**Phase 11** ✅ Integration tests — adapter→filter→report pipeline (ed7719a)
+**Phase 12** ✅ Deprecated detector cleanup — 27 stub replacements, 325 lines deleted (f287d93)
+**Phase 13** ✅ CLI finalization — custodian-report + unified custodian dispatcher (9ec3ea9)
+**Phase 14** ✅ Pre-commit integration — .pre-commit-hooks.yaml + local config (05f6336)
+**Phase 15** ✅ Multi-repo enhancements — --skip-deprecated, --report-dir (432a58d)
 
-**Phase 0 — Detector Disposition** ✅ DONE (committed 984c000)
-**Phase 1 — Core Abstractions** — `Finding` model, `ToolAdapter` interface, `runner.py` skeleton, config loader (old schema only)
-**Phase 2 — Ruff Adapter** — `adapters/ruff.py`, parse Ruff JSON → `Finding`, run parallel with existing detectors
-**Phase 3 — Ruff Migration** — mark overlapping C/I/X detectors deprecated, disable behind flag, parity-validate
-**Phase 4 — Semgrep Adapter** — `adapters/semgrep.py`, `rules/semgrep/` pack, migrate S3/AI1/AI3/C28/C32
-**Phase 5 — Policy Layer** — `policy/architecture_rules.py`, `policy/repo_rules.py`, `policy/hygiene_rules.py`
-**Phase 6 — Type Checking** — `adapters/ty.py` + `adapters/mypy.py` (fallback); remove E*, D3
-**Phase 7 — Dead Code** — optional Vulture adapter; D1/D5/F1/F2 → vulture advisory; D7 retired
-**Phase 8 — Codemod Separation** — `codemods/` via libcst; `custodian fix` / `custodian migrate` commands; audit never mutates
-**Phase 9 — Config Migration** — config normalizer; old schema → internal model; deprecation warnings; `custodian config migrate`
-**Phase 10 — Reporting** — JSON, SARIF, Markdown report builders
-**Phase 11 — Test Rewrite** — adapter/policy/config tests replace detector tests
-**Phase 12 — Detector Cleanup** — delete legacy AST detectors, shrink Custodian dramatically
-**Phase 13 — CLI Finalization** — `custodian audit / fix / migrate / report`
-**Phase 14 — Pre-commit Integration** — `.pre-commit-config.yaml` generation or adapter
-**Phase 15 — Multi-Repo Execution** — cross-repo invariants, aggregate reporting
+**S4 detector** ✅ tests/conftest.py venv guard check + Custodian's own conftest guard (80b6ea6)
 
 **Repo-level issues remaining**
 - VF: C9=289 (broad except), D1=~0 (bulk cleared round 9), D3=~40 missing NoReturn, D5=0 (resolved), D6=3 (DeliveryDTO/OutlineSection/NLTKCheckStage — false positives), D7=35 (keyword-only params, can't rename), F3=11 (MongoDB fields)
