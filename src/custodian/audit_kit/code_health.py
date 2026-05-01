@@ -141,6 +141,10 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C23", "subprocess called with shell=True",               "open",     detect_c23,  HIGH),
         Detector("C24", "pickle.load/loads usage (unsafe deserialization)","open",     detect_c24,  HIGH),
         Detector("C25", "raise ... from None (suppresses exception chain)","open",     detect_c25,  LOW),
+        Detector("C26", "os.system() call (prefer subprocess)",           "open",     detect_c26,  MEDIUM),
+        Detector("C27", "assert False / assert 0 as permanent sentinel",  "open",     detect_c27,  LOW),
+        Detector("C28", "hardcoded IP address in string literal",         "open",     detect_c28,  LOW),
+        Detector("C29", "file exceeds line-count threshold",              "open",     detect_c29,  LOW),
     ]
 
 
@@ -452,7 +456,7 @@ def detect_c17(context: AuditContext) -> DetectorResult:
     return _count_pattern(_py_files(context, "C17"), _LEN_COMPARE_RE)
 
 
-_USELESS_FSTRING_RE = re.compile(r"""\bf(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
+_USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)f(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
 
 _PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
 
@@ -565,6 +569,89 @@ def detect_c25(context: AuditContext) -> DetectorResult:
         _py_files(context, "C25"),
         re.compile(r"\braise\b.+\bfrom\s+None\b"),
     )
+
+
+def detect_c26(context: AuditContext) -> DetectorResult:
+    """Flag ``os.system()`` calls in source.
+
+    ``os.system`` invokes a shell command as a string, with the same
+    injection risk as ``subprocess(shell=True)`` and with less control
+    over the child process.  Prefer ``subprocess.run`` with a list of
+    arguments.
+    """
+    return _count_pattern(
+        _py_files(context, "C26"),
+        re.compile(r"\bos\.system\s*\("),
+    )
+
+
+def detect_c27(context: AuditContext) -> DetectorResult:
+    """Flag ``assert False`` and ``assert 0`` used as permanent error sentinels.
+
+    These statements are stripped by the optimiser (``python -O``) and will
+    silently pass in optimised builds.  Use ``raise RuntimeError(...)`` or
+    a more specific exception instead.
+    """
+    return _count_pattern(
+        _py_files(context, "C27"),
+        re.compile(r"\bassert\s+(False|0)\b"),
+    )
+
+
+def detect_c28(context: AuditContext) -> DetectorResult:
+    """Flag hardcoded IPv4 address literals in string constants.
+
+    Hardcoded IPs couple code to a specific environment and are easy to
+    overlook when infrastructure changes.  Use configuration, environment
+    variables, or named constants instead.  ``127.0.0.1`` and ``0.0.0.0``
+    (localhost/any-bind) are excluded as they are almost always intentional.
+    """
+    _EXCLUDED = {"127.0.0.1", "0.0.0.0", "127.0.0.0"}
+    samples: list[str] = []
+    count = 0
+    _IP_IN_STRING = re.compile(r"""["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']""")
+    for path in _py_files(context, "C28"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for m in _IP_IN_STRING.finditer(text):
+            ip = m.group(1)
+            if ip in _EXCLUDED:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{path}:{m.group(0)[:40]}")
+    return DetectorResult(count=count, samples=samples)
+
+
+def detect_c29(context: AuditContext) -> DetectorResult:
+    """Flag source files that exceed the line-count threshold.
+
+    Very long files are hard to navigate and often indicate a missing
+    abstraction boundary.  Default threshold: 500 lines.  Configurable:
+        audit:
+          c29_threshold: 800
+    """
+    audit_cfg = context.config.get("audit") or {}
+    try:
+        limit = int(audit_cfg.get("c29_threshold") or 500)
+    except (TypeError, ValueError):
+        limit = 500
+
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C29"):
+        try:
+            n = path.read_text(encoding="utf-8").count("\n")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if n > limit:
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                samples.append(f"{rel}: {n} lines (limit {limit})")
+    return DetectorResult(count=count, samples=samples)
 
 
 def detect_c16(context: AuditContext) -> DetectorResult:

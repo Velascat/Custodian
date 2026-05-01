@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from custodian.audit_kit.code_health import build_code_health_detectors, detect_c9, detect_c10, detect_c11, detect_c12, detect_c13, detect_c14, detect_c15, detect_c16, detect_c17, detect_c18
+from custodian.audit_kit.code_health import (
+    build_code_health_detectors,
+    detect_c9, detect_c10, detect_c11, detect_c12, detect_c13,
+    detect_c14, detect_c15, detect_c16, detect_c17, detect_c18,
+    detect_c21, detect_c22, detect_c23, detect_c24, detect_c25,
+    detect_c26, detect_c27, detect_c28, detect_c29,
+)
 from custodian.audit_kit.detector import AuditContext
 
 
@@ -463,3 +469,174 @@ def test_c18_skips_plain_string(tmp_path):
 def test_c18_flags_continuation_line(tmp_path):
     ctx = _ctx(tmp_path, 'raise ValueError(\n    f"context: {x}"\n    f"no interpolation here"\n)\n')
     assert detect_c18(ctx).count == 1
+
+
+# ── C21: mutable default argument ────────────────────────────────────────────
+
+def test_c21_flags_list_default(tmp_path):
+    ctx = _ctx(tmp_path, "def foo(x=[]):\n    pass\n")
+    assert detect_c21(ctx).count == 1
+
+
+def test_c21_flags_dict_default(tmp_path):
+    ctx = _ctx(tmp_path, "def foo(x={}):\n    pass\n")
+    assert detect_c21(ctx).count == 1
+
+
+def test_c21_flags_set_default(tmp_path):
+    ctx = _ctx(tmp_path, "def foo(x=set()):\n    pass\n")
+    assert detect_c21(ctx).count == 0  # set() is a Call, not ast.Set literal
+
+
+def test_c21_flags_set_literal_default(tmp_path):
+    ctx = _ctx(tmp_path, "def foo(x={1, 2}):\n    pass\n")
+    assert detect_c21(ctx).count == 1
+
+
+def test_c21_skips_none_default(tmp_path):
+    ctx = _ctx(tmp_path, "def foo(x=None):\n    pass\n")
+    assert detect_c21(ctx).count == 0
+
+
+def test_c21_skips_immutable_default(tmp_path):
+    ctx = _ctx(tmp_path, "def foo(x=42, y='hi'):\n    pass\n")
+    assert detect_c21(ctx).count == 0
+
+
+# ── C22: time.sleep() ─────────────────────────────────────────────────────────
+
+def test_c22_flags_time_sleep(tmp_path):
+    ctx = _ctx(tmp_path, "import time\ntime.sleep(1)\n")
+    assert detect_c22(ctx).count == 1
+
+
+def test_c22_skips_sleep_in_name(tmp_path):
+    ctx = _ctx(tmp_path, "sleepytime = 5\n")
+    assert detect_c22(ctx).count == 0
+
+
+# ── C23: subprocess shell=True ────────────────────────────────────────────────
+
+def test_c23_flags_shell_true(tmp_path):
+    ctx = _ctx(tmp_path, 'import subprocess\nsubprocess.run("ls", shell=True)\n')
+    assert detect_c23(ctx).count == 1
+
+
+def test_c23_skips_shell_false(tmp_path):
+    ctx = _ctx(tmp_path, 'import subprocess\nsubprocess.run(["ls"], shell=False)\n')
+    assert detect_c23(ctx).count == 0
+
+
+# ── C24: pickle.load/loads ────────────────────────────────────────────────────
+
+def test_c24_flags_pickle_loads(tmp_path):
+    ctx = _ctx(tmp_path, "import pickle\ndata = pickle.loads(raw)\n")
+    assert detect_c24(ctx).count == 1
+
+
+def test_c24_flags_pickle_load(tmp_path):
+    ctx = _ctx(tmp_path, "import pickle\ndata = pickle.load(f)\n")
+    assert detect_c24(ctx).count == 1
+
+
+def test_c24_skips_pickle_dump(tmp_path):
+    ctx = _ctx(tmp_path, "import pickle\npickle.dump(obj, f)\n")
+    assert detect_c24(ctx).count == 0
+
+
+# ── C25: raise ... from None ──────────────────────────────────────────────────
+
+def test_c25_flags_raise_from_none(tmp_path):
+    ctx = _ctx(tmp_path, "raise ValueError('oops') from None\n")
+    assert detect_c25(ctx).count == 1
+
+
+def test_c25_skips_plain_raise(tmp_path):
+    ctx = _ctx(tmp_path, "raise ValueError('oops')\n")
+    assert detect_c25(ctx).count == 0
+
+
+# ── C26: os.system() ─────────────────────────────────────────────────────────
+
+def test_c26_flags_os_system(tmp_path):
+    ctx = _ctx(tmp_path, 'import os\nos.system("ls")\n')
+    assert detect_c26(ctx).count == 1
+
+
+def test_c26_skips_os_path(tmp_path):
+    ctx = _ctx(tmp_path, "import os\nos.path.join('a', 'b')\n")
+    assert detect_c26(ctx).count == 0
+
+
+# ── C27: assert False / assert 0 ─────────────────────────────────────────────
+
+def test_c27_flags_assert_false(tmp_path):
+    ctx = _ctx(tmp_path, "def bad():\n    assert False, 'not reached'\n")
+    assert detect_c27(ctx).count == 1
+
+
+def test_c27_flags_assert_zero(tmp_path):
+    ctx = _ctx(tmp_path, "def bad():\n    assert 0\n")
+    assert detect_c27(ctx).count == 1
+
+
+def test_c27_skips_normal_assert(tmp_path):
+    ctx = _ctx(tmp_path, "def ok(x):\n    assert x > 0\n")
+    assert detect_c27(ctx).count == 0
+
+
+# ── C28: hardcoded IP address ─────────────────────────────────────────────────
+
+def test_c28_flags_real_ip(tmp_path):
+    ctx = _ctx(tmp_path, 'host = "192.168.1.1"\n')
+    assert detect_c28(ctx).count == 1
+
+
+def test_c28_skips_localhost(tmp_path):
+    ctx = _ctx(tmp_path, 'host = "127.0.0.1"\n')
+    assert detect_c28(ctx).count == 0
+
+
+def test_c28_skips_any_bind(tmp_path):
+    ctx = _ctx(tmp_path, 'bind = "0.0.0.0"\n')
+    assert detect_c28(ctx).count == 0
+
+
+def test_c28_skips_non_ip_string(tmp_path):
+    ctx = _ctx(tmp_path, 'addr = "not.an.ip.address"\n')
+    assert detect_c28(ctx).count == 0
+
+
+# ── C29: file too long ────────────────────────────────────────────────────────
+
+def test_c29_flags_file_over_threshold(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "big.py").write_text("\n" * 501, encoding="utf-8")
+    ctx = AuditContext(
+        repo_root=tmp_path, src_root=src, tests_root=tmp_path / "tests",
+        config={}, plugin_modules=[],
+    )
+    assert detect_c29(ctx).count == 1
+
+
+def test_c29_skips_file_at_threshold(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "ok.py").write_text("\n" * 500, encoding="utf-8")
+    ctx = AuditContext(
+        repo_root=tmp_path, src_root=src, tests_root=tmp_path / "tests",
+        config={}, plugin_modules=[],
+    )
+    assert detect_c29(ctx).count == 0
+
+
+def test_c29_respects_custom_threshold(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "medium.py").write_text("\n" * 201, encoding="utf-8")
+    ctx = AuditContext(
+        repo_root=tmp_path, src_root=src, tests_root=tmp_path / "tests",
+        config={"audit": {"c29_threshold": 200}}, plugin_modules=[],
+    )
+    assert detect_c29(ctx).count == 1

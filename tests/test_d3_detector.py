@@ -153,3 +153,21 @@ class TestD3:
                     return -1
         """, tmp_path)
         assert detect_d3(_ctx(tmp_path, f)).count == 0
+
+    def test_if_branches_return_then_raise_not_flagged(self, tmp_path):
+        f = _forest("""
+            def __getattr__(name: str):
+                if name == "Foo":
+                    return Foo
+                if name == "Bar":
+                    return Bar
+                raise AttributeError(name)
+        """, tmp_path)
+        assert detect_d3(_ctx(tmp_path, f)).count == 0
+
+    def test_single_raise_no_return_flagged(self, tmp_path):
+        f = _forest("""
+            def always_fails():
+                raise RuntimeError("always")
+        """, tmp_path)
+        assert detect_d3(_ctx(tmp_path, f)).count == 1

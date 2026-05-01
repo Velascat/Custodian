@@ -12,10 +12,10 @@ T1  Public src functions and classes with zero name references in tests.
     and integration tests will produce false positives.
 
 T2  Test functions with no assertion — a function whose name starts with
-    ``test_`` and whose body contains no ``assert`` statement (ast.Assert).
-    These are most likely forgotten stubs or tests that lost their
-    assertions during a refactor.  Note: unittest-style ``self.assertEqual``
-    calls are *not* caught here — T2 targets pytest-style tests only.
+    ``test_`` and whose body contains no assertion mechanism.  Recognized
+    assertion forms: ``assert`` statements, ``pytest.raises/warns/
+    deprecated_call`` context managers, and unittest-style ``self.assertX``
+    / ``self.failX`` calls.  Tests using only these forms are not flagged.
 """
 from __future__ import annotations
 
@@ -41,11 +41,37 @@ def build_test_shape_detectors() -> list[Detector]:
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _has_assert(node: ast.AST) -> bool:
-    """True if any ast.Assert appears in the subtree rooted at node."""
+_PYTEST_ASSERTION_ATTRS = frozenset({
+    "raises", "warns", "deprecated_call", "approx", "fail",
+})
+
+
+def _has_assertion_mechanism(node: ast.AST) -> bool:
+    """True if the subtree contains any recognized assertion mechanism.
+
+    Recognized forms:
+    - ast.Assert (``assert x``)
+    - pytest.raises / pytest.warns / etc. (``with pytest.raises(...):`` or call)
+    - self.assertX / self.failX (unittest-style)
+    """
     for child in ast.walk(node):
         if isinstance(child, ast.Assert):
             return True
+        if not isinstance(child, ast.Call):
+            continue
+        func = child.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        attr = func.attr
+        value = func.value
+        # pytest.raises / pytest.warns / pytest.deprecated_call
+        if isinstance(value, ast.Name) and value.id == "pytest":
+            if attr in _PYTEST_ASSERTION_ATTRS:
+                return True
+        # self.assertX / self.failX (unittest)
+        if isinstance(value, ast.Name) and value.id == "self":
+            if attr.startswith("assert") or attr.startswith("fail"):
+                return True
     return False
 
 
@@ -118,7 +144,7 @@ def detect_t2(context: AuditContext) -> DetectorResult:
                 continue
             if not node.name.startswith("test_"):
                 continue
-            if not _has_assert(node):
+            if not _has_assertion_mechanism(node):
                 count += 1
                 if len(samples) < _MAX_SAMPLES:
                     samples.append(f"{rel}:{node.lineno}: {node.name}() — no assert")

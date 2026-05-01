@@ -172,6 +172,8 @@ def detect_s2(context: AuditContext) -> DetectorResult:
 
     for mod_a, imports_a in sorted(runtime_edges.items()):
         for mod_b in sorted(imports_a):
+            if mod_b == mod_a:  # self-import from relative resolution
+                continue
             if mod_b not in runtime_edges:
                 continue
             if mod_a in runtime_edges.get(mod_b, set()):

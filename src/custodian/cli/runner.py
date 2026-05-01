@@ -13,6 +13,7 @@ from custodian.audit_kit.detectors.annotations import build_annotation_detectors
 from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.ghost import build_ghost_detectors
+from custodian.audit_kit.detectors.imports import build_import_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.detectors.test_shape import build_test_shape_detectors
@@ -64,6 +65,7 @@ def run_repo_audit(
                   + build_annotation_detectors()
                   + build_complexity_detectors()
                   + build_ghost_detectors()
+                  + build_import_detectors()
                   + extra)
 
     if only:

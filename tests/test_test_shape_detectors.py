@@ -107,3 +107,38 @@ class TestT2:
         result = detect_t2(_ctx(tmp_path))
         assert result.count == 1
         assert "test_forgotten" in result.samples[0]
+
+    def test_pytest_raises_not_flagged(self, tmp_path):
+        _write_test_file("""
+            import pytest
+            def test_raises():
+                with pytest.raises(ValueError):
+                    raise ValueError("oops")
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_pytest_warns_not_flagged(self, tmp_path):
+        _write_test_file("""
+            import pytest
+            def test_warns():
+                with pytest.warns(DeprecationWarning):
+                    pass
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_self_assert_equal_not_flagged(self, tmp_path):
+        _write_test_file("""
+            class TestFoo:
+                def test_eq(self):
+                    self.assertEqual(1, 1)
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_self_assert_raises_not_flagged(self, tmp_path):
+        _write_test_file("""
+            class TestFoo:
+                def test_raises(self):
+                    with self.assertRaises(ValueError):
+                        raise ValueError()
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0

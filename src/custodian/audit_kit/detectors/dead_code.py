@@ -268,6 +268,20 @@ def _is_annotated_noreturn(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
     return False
 
 
+def _has_return_in_scope(stmts: list[ast.stmt]) -> bool:
+    """True if stmts contains a Return statement not inside a nested function/class."""
+    for stmt in stmts:
+        if isinstance(stmt, ast.Return):
+            return True
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue  # nested scope — do not descend
+        # Recurse into compound statement blocks
+        for nested in _stmts_of(stmt):
+            if _has_return_in_scope(nested):
+                return True
+    return False
+
+
 # ── D2 ────────────────────────────────────────────────────────────────────────
 
 def _dead_else_nodes(stmts: list[ast.stmt]) -> list[ast.If]:
@@ -340,6 +354,8 @@ def detect_d3(context: AuditContext) -> DetectorResult:
                 continue
             if not node.body:
                 continue
+            if _has_return_in_scope(node.body):
+                continue  # can return normally — not NoReturn
             if _all_paths_noreturn(node.body):
                 count += 1
                 if len(samples) < _MAX_SAMPLES:
