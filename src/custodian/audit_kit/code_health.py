@@ -251,10 +251,12 @@ def detect_c11(context: AuditContext) -> DetectorResult:
             continue
         lines = text.splitlines()
         for m in _SUBPROCESS_CALL_RE.finditer(text):
+            lineno = text[: m.start()].count("\n") + 1
+            if lines[lineno - 1].lstrip().startswith("#"):
+                continue
             call_body = _extract_call_body(text, m.start())
             if "timeout" in call_body:
                 continue
-            lineno = text[: m.start()].count("\n") + 1
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 rel = path.relative_to(context.repo_root)
