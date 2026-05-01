@@ -155,14 +155,29 @@ def _sample(
 def _scan_functions(
     context: AuditContext,
     predicate,
+    *,
+    detector_id: str | None = None,
 ) -> DetectorResult:
     if context.graph is None or context.graph.ast_forest is None:
         return DetectorResult(count=0, samples=[])
+
+    excluded_paths: set[str] = set()
+    if detector_id:
+        audit_cfg: dict = context.config.get("audit") or {}
+        globs: list[str] = list((audit_cfg.get("exclude_paths") or {}).get(detector_id) or [])
+        if globs:
+            from pathlib import PurePosixPath
+            for path in context.graph.ast_forest.trees:
+                rel = str(path.relative_to(context.repo_root))
+                if any(PurePosixPath(rel).match(g) for g in globs):
+                    excluded_paths.add(str(path))
 
     samples: list[str] = []
     count = 0
 
     for path, tree, _src in context.graph.ast_forest.items():
+        if str(path) in excluded_paths:
+            continue
         protocol_names = _protocol_classes(tree)
         except_fn_ids = _except_handler_functions(tree)
 
@@ -191,7 +206,7 @@ def detect_u1(context: AuditContext) -> DetectorResult:
     def predicate(func):
         body = _strip_docstring(func.body)
         return len(body) == 1 and _is_not_implemented_raise(body[0])
-    return _scan_functions(context, predicate)
+    return _scan_functions(context, predicate, detector_id="U1")
 
 
 # ── U2 ────────────────────────────────────────────────────────────────────────
@@ -201,7 +216,7 @@ def detect_u2(context: AuditContext) -> DetectorResult:
     def predicate(func):
         body = _strip_docstring(func.body)
         return len(body) == 1 and _is_ellipsis_only(body[0])
-    return _scan_functions(context, predicate)
+    return _scan_functions(context, predicate, detector_id="U2")
 
 
 # ── U3 ────────────────────────────────────────────────────────────────────────
@@ -216,4 +231,4 @@ def detect_u3(context: AuditContext) -> DetectorResult:
             return False
         # And nothing else after the docstring
         return len(func.body) == 1
-    return _scan_functions(context, predicate)
+    return _scan_functions(context, predicate, detector_id="U3")
