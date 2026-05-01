@@ -54,6 +54,7 @@ Globs are matched against file paths relative to repo_root.
 from __future__ import annotations
 
 import ast
+import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -89,11 +90,11 @@ def build_structure_detectors() -> list[Detector]:
 def _glob_match(rel_path: Path, glob: str) -> bool:
     """Match a repo-relative path against a glob pattern.
 
-    Uses PurePosixPath.match() which supports ``*`` (single component) and
-    ``**`` (any number of components) in Python 3.12+.  Paths are normalised
-    to POSIX form before matching.
+    Uses fnmatch so that ``**`` matches any number of path components
+    (including those with ``/`` separators), which pathlib.match() does not
+    handle correctly for nested directories in Python 3.12.
     """
-    return PurePosixPath(rel_path.as_posix()).match(glob)
+    return fnmatch.fnmatch(rel_path.as_posix(), glob)
 
 
 def _any_glob(rel_path: Path, globs: list[str]) -> bool:

@@ -112,7 +112,7 @@
 
 | Code | Description | Severity | Module | Destination | Blocking | Replacement | FP Risk | Migration Notes |
 |---|---|---|---|---|---|---|---|---|
-| A1 | Declarative YAML invariant (max_lines, max_classes, max_functions, forbidden_import) | HIGH | structure.py | `custodian_policy` | Yes (HIGH) | Semgrep for `forbidden_import`; `max_*` metrics Custodian-owned | LOW | Permanently Custodian-owned. `forbidden_import` rules could move to Semgrep rules dir in Phase 4; structural thresholds stay in Custodian. |
+| A1 | Declarative YAML invariant (max_lines, max_classes, max_functions, forbidden_import, forbidden_import_prefix) | HIGH | structure.py | `custodian_policy` | Yes (HIGH) | `max_*` metrics Custodian-owned; `forbidden_import*` keys are the canonical import-policy layer (replaced custom plugin AST walkers) | LOW | Permanently Custodian-owned. `forbidden_import_prefix` (added) catches both `import foo.bar` and `from foo.bar import x` with one rule — used by OC AI1 and VF VF2/VF4 invariants. |
 
 ---
 
@@ -179,10 +179,10 @@
 
 | Code | Description | Status | Destination | Blocking | Replacement | Migration Notes |
 |---|---|---|---|---|---|---|
-| AI1 | Managed-repo imports inside `src/operations_center/` | fixed | `semgrep` | Yes | Semgrep custom rule: `import` from managed repo paths | Ideal Semgrep rule; migrate in Phase 4. Remove Python implementation after. |
-| AI2 | Layer-direction violations | fixed | `custodian_policy` | Yes | Overlaps with S1; audit layer_rules.py before migrating | OC `.custodian.yaml` note says this overlaps with S1. Migrate AI2 into S1 declarative config when layer_rules.py is audited. |
-| AI3 | Directory-scanning in `artifact_index` | fixed | `semgrep` | Yes | Semgrep pattern: `os.scandir`/`os.listdir` in `artifact_index/**` | Structural pattern; ideal Semgrep candidate |
-| AI4 | Anti-collapse guardrail structurally present | fixed | `custodian_policy` | Yes | None | Structural invariant that requires runtime knowledge of OC's architecture. Keep in Custodian. |
+| AI1 | Managed-repo imports inside `src/operations_center/` | fixed | `custodian_policy` (A1 declarative) | Yes | `architecture.invariants[forbidden_import_prefix]` in `.custodian.yaml` | **DONE.** Python plugin detector removed; now enforced via A1 `forbidden_import_prefix` rule (3 rules: videofoundry, tools.audit, managed_repo). No semgrep needed. |
+| AI2 | Layer-direction violations (fast-feedback ladder) | fixed | `custodian_policy` (S1 declarative) | Yes | `architecture.layers` in `.custodian.yaml` | **DONE.** Python plugin detector removed; now enforced via S1 declarative layer rules (slice_replay, mini_regression, fixture_harvesting, audit_governance). |
+| AI3 | Directory-scanning in `artifact_index` | fixed | `semgrep` | Yes | Semgrep pattern: `glob`/`rglob`/`scandir` in `artifact_index/**` | **[TRANSITIONAL]** Python implementation active; marked for replacement with semgrep rule in Phase 4. |
+| AI4 | Anti-collapse guardrail structurally present | fixed | `custodian_policy` | Yes | None | Structural invariant that requires runtime knowledge of OC's architecture. Keep in Custodian permanently. |
 
 ---
 
@@ -420,10 +420,11 @@ Every adapter must handle the case where the external tool is not installed:
 | Destination | Count | Detectors |
 |---|---|---|
 | `ruff` | 17 | C2, C3, C4, C5, C10, C12, C13, C14, C15, C18, C19, C20, C21, C23*, C24, C26, C27, C31, D4*, E1, E2, I1, X1, X2 |
-| `semgrep` | 5 | C28, C32, S3, AI1, AI3 |
+| `semgrep` | 3 | C28, C32, S3 |
+| `semgrep` (transitional — Python impl active) | 2 | AI3, VF3 |
 | `ty` / `mypy_fallback` | 1 | D3 |
-| `vulture_advisory` | 5 | D1, D5, F1, F2 |
-| `custodian_policy` | 18 | C8, C11*, D6, F3, S1, S2, A1, T1, T2, U1, U2, U3, OC2, OC3, OC8, OC9, AI2, AI4 |
+| `vulture_advisory` | 4 | D1, D5, F1, F2 |
+| `custodian_policy` | 20 | C8, C11*, D6, F3, S1, S2, A1, T1, T2, U1, U2, U3, OC2, OC3, OC8, OC9, AI1 (→A1), AI2 (→S1), AI4, VF2 (→A1), VF4 (→A1) |
 | `custodian_hygiene` | 8 | C1, C6, C9*, C29, C33, G1, OC5* |
 | `retire` | 7 | C7, C22, C25, D2, D7, OC1, OC4, OC6, OC7 |
 

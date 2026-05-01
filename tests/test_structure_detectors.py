@@ -311,6 +311,73 @@ class TestA1:
         })
         assert detect_a1(ctx).count == 0
 
+    # ── forbidden_import_prefix tests ────────────────────────────────────────
+
+    def test_forbidden_import_prefix_direct_import(self, tmp_path):
+        src = "import tools.audit.runner\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 1
+
+    def test_forbidden_import_prefix_from_import(self, tmp_path):
+        src = "from tools.audit import runner\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 1
+
+    def test_forbidden_import_prefix_submodule(self, tmp_path):
+        src = "from tools.audit.checks.imports import detect\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 1
+
+    def test_forbidden_import_prefix_exact_match(self, tmp_path):
+        # "import tools" is the parent package — must NOT match prefix "tools.audit"
+        src = "import tools\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0
+
+    def test_forbidden_import_prefix_partial_name_no_match(self, tmp_path):
+        # "tools.auditor" must not match prefix "tools.audit"
+        src = "import tools.auditor\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0
+
+    def test_forbidden_import_prefix_glob_not_matching(self, tmp_path):
+        src = "import tools.audit.runner\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/other/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0
+
+    def test_forbidden_import_prefix_clean_file(self, tmp_path):
+        src = "import os\nfrom pathlib import Path\n"
+        ctx = self._ctx(src, tmp_path, config={
+            "architecture": {"invariants": [
+                {"name": "no tools.audit", "glob": "src/**/*.py", "forbidden_import_prefix": "tools.audit"}
+            ]}
+        })
+        assert detect_a1(ctx).count == 0
+
 
 class TestDetectS4:
     def _ctx(self, tmp_path: Path, tests_root=None) -> AuditContext:
