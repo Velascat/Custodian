@@ -180,3 +180,18 @@ class TestT2:
                         raise AssertionError(f"item {item!r} failed")
         """, tmp_path)
         assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_assert_underscore_function_not_flagged(self, tmp_path):
+        _write_test_file("""
+            def test_custom_assert():
+                obj = object()
+                assert_no_mutation_fields(obj)
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_non_assert_underscore_function_flagged(self, tmp_path):
+        _write_test_file("""
+            def test_plain_call():
+                validate_something()
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 1

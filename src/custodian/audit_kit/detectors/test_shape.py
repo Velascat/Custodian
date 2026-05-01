@@ -86,6 +86,14 @@ def _has_assertion_mechanism(node: ast.AST) -> bool:
         # mock.assert_called_once() / mock.assert_not_called() / etc.
         if any(attr.startswith(p) for p in _MOCK_ASSERT_PREFIXES):
             return True
+    # assert_*() module-level function calls (e.g. assert_no_mutation_fields(x))
+    for child in ast.walk(node):
+        if (
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id.startswith("assert_")
+        ):
+            return True
     return False
 
 
