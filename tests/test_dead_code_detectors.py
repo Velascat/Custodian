@@ -598,3 +598,29 @@ class Settings(BaseModel):
         return getattr(self, attr)
 """, tmp_path)
         assert detect_f3(ctx).count == 0
+
+    def test_model_validate_class_not_flagged(self, tmp_path):
+        # ClassName.model_validate(...) marks all fields as schema fields
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class RunStatus(BaseModel):
+    current_phase: str
+    version: int
+
+status = RunStatus.model_validate({"current_phase": "done", "version": 1})
+""", tmp_path)
+        assert detect_f3(ctx).count == 0
+
+    def test_nested_model_in_validated_class_not_flagged(self, tmp_path):
+        # Fields in nested Pydantic models under a model_validate'd class are also schema fields
+        ctx = self._ctx("""
+from pydantic import BaseModel
+class Step(BaseModel):
+    field_name: str
+    phase_required: str
+class Config(BaseModel):
+    step: Step
+
+cfg = Config.model_validate({"step": {"field_name": "x"}})
+""", tmp_path)
+        assert detect_f3(ctx).count == 0

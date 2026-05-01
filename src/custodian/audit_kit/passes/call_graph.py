@@ -52,6 +52,7 @@ class CallGraph:
     constructed_names: set[str] = field(default_factory=set)
     kw_arg_names: set[str] = field(default_factory=set)  # keyword arg names used in calls
     dynamic_getattr_classes: set[str] = field(default_factory=set)  # classes with getattr(self, var) patterns
+    model_validate_classes: set[str] = field(default_factory=set)  # classes deserialized via model_validate*()
 
 
 def build_call_graph(src_root: Path, extra_roots: list[Path] | None = None) -> CallGraph:
@@ -127,6 +128,16 @@ def _collect_usages_only(tree: ast.Module, cg: CallGraph) -> None:
                 cg.constructed_names.add(node.value.id)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             cg.called_names.add(node.id)
+    # ClassName.model_validate*(...) — deserialized from external data; all fields are schema fields
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr.startswith("model_validate")
+                and isinstance(func.value, ast.Name)
+            ):
+                cg.model_validate_classes.add(func.value.id)
 
 
 def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
@@ -182,6 +193,17 @@ def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
                 if isinstance(receiver, ast.Name) and receiver.id == "self" and not isinstance(key, ast.Constant):
                     cg.dynamic_getattr_classes.add(node.name)
                     break
+
+    # ClassName.model_validate*(...) — deserialized from external data; all fields are schema fields
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr.startswith("model_validate")
+                and isinstance(func.value, ast.Name)
+            ):
+                cg.model_validate_classes.add(func.value.id)
 
     # All call sites, attribute accesses, and bare name references
     for node in ast.walk(tree):

@@ -515,6 +515,61 @@ def _pydantic_field_names(src_root: Path) -> dict[str, set[str]]:
     return fields
 
 
+def _expand_model_validate_classes(src_root: Path, seed: set[str]) -> set[str]:
+    """Transitively expand model_validate_classes to include nested Pydantic models.
+
+    If class A is deserialized via model_validate and has a field typed as class B,
+    then B is also effectively deserialized (Pydantic handles nested model inflation).
+    Runs until stable (usually 2-3 iterations for real codebases).
+    """
+    # Build: class_name → set of field type names (from AnnAssign annotations)
+    class_to_field_types: dict[str, set[str]] = {}
+    for path in sorted(src_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            type_names: set[str] = set()
+            for stmt in node.body:
+                if not isinstance(stmt, ast.AnnAssign):
+                    continue
+                ann = stmt.annotation
+                # Unwrap Optional/list/Union subscripts to find the inner Name
+                to_check = [ann]
+                while to_check:
+                    a = to_check.pop()
+                    if isinstance(a, ast.Name):
+                        type_names.add(a.id)
+                    elif isinstance(a, ast.Subscript):
+                        to_check.append(a.value)
+                        if isinstance(a.slice, ast.Tuple):
+                            to_check.extend(a.slice.elts)
+                        else:
+                            to_check.append(a.slice)
+                    elif isinstance(a, ast.BinOp):  # X | Y union syntax
+                        to_check.extend([a.left, a.right])
+            if type_names:
+                class_to_field_types.setdefault(node.name, set()).update(type_names)
+
+    expanded = set(seed)
+    while True:
+        added: set[str] = set()
+        for cls in list(expanded):
+            for field_type in class_to_field_types.get(cls, set()):
+                if field_type not in expanded:
+                    added.add(field_type)
+        if not added:
+            break
+        expanded |= added
+    return expanded
+
+
 def detect_f3(context: AuditContext) -> DetectorResult:
     """Flag Pydantic BaseModel/BaseSettings fields never accessed as attributes."""
     if context.graph is None or context.graph.call_graph is None:
@@ -522,6 +577,10 @@ def detect_f3(context: AuditContext) -> DetectorResult:
 
     cg = context.graph.call_graph
     field_map = _pydantic_field_names(context.src_root)  # field_name → set of class names
+    # Expand: nested Pydantic models under deserialized classes are also schema fields
+    model_validate_classes = _expand_model_validate_classes(
+        context.src_root, cg.model_validate_classes
+    )
 
     samples: list[str] = []
     count = 0
@@ -535,6 +594,9 @@ def detect_f3(context: AuditContext) -> DetectorResult:
             continue
         # Skip fields from classes that use getattr(self, variable) — dynamic access
         if class_names & cg.dynamic_getattr_classes:
+            continue
+        # Skip fields from classes deserialized via model_validate* — all fields are schema fields
+        if class_names & model_validate_classes:
             continue
         count += 1
         if len(samples) < _MAX_SAMPLES:
