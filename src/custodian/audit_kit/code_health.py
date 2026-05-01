@@ -170,40 +170,6 @@ def detect_c8(context: AuditContext) -> DetectorResult:
     return DetectorResult(count=count, samples=samples)
 
 
-_BROAD_EXCEPT_RE = re.compile(
-    r"^\s+except\s+(?:Exception|BaseException)\s*(?:as\s+\w+)?\s*:",
-    re.MULTILINE,
-)
-_LOGGER_CALL_RE = re.compile(
-    r"\blogger\s*\.\s*\w+\s*\("          # logger.xxx(
-    r"|logging\s*\.\s*\w+\s*\("          # logging.xxx(
-    r"|\)\s*\.\s*(?:warning|error|exception|critical|warn)\s*\("  # x().warning( — chained calls
-    r"|\b\w+_logger\s*\(\s*\)\s*\."      # _get_foo_logger().
-    r"|\b\w+\s*\.\s*(?:exception|critical)\s*\("  # any.exception/critical( — almost exclusively logging
-)
-_RAISE_RE = re.compile(r"^\s+raise\b", re.MULTILINE)
-
-
-def _extract_block(lines: list[str], except_lineno: int) -> str:
-    """Return the body of an except-handler (lines after the handler header).
-
-    Stops at the first non-blank line whose indentation is <= the handler line.
-    ``except_lineno`` is 1-based.
-    """
-    except_indent = len(lines[except_lineno - 1]) - len(lines[except_lineno - 1].lstrip())
-    block_lines: list[str] = []
-    for line in lines[except_lineno:]:  # body lines of the handler
-        stripped = line.lstrip()
-        if not stripped:
-            block_lines.append(line)
-            continue
-        if len(line) - len(stripped) <= except_indent:
-            break  # dedented — block ended
-        block_lines.append(line)
-    return "\n".join(block_lines)
-
-
-
 _SUBPROCESS_CALL_RE = re.compile(
     r"\bsubprocess\.(run|call|check_output|check_call)\s*\("
 )
@@ -263,39 +229,6 @@ def detect_c11(context: AuditContext) -> DetectorResult:
                 samples.append(f"{rel}:{lineno}: {lines[lineno - 1].strip()[:60]}")
     return DetectorResult(count=count, samples=samples)
 
-
-
-
-_ASSERT_RE = re.compile(r"^\s+assert\s+", re.MULTILINE)
-
-
-
-_OPEN_CALL_RE = re.compile(r"(?<![.\w])open\s*\(")
-_BINARY_MODES = frozenset([
-    '"rb"', "'rb'", '"wb"', "'wb'", '"ab"', "'ab'",
-    '"rb+"', "'rb+'", '"wb+"', "'wb+'", '"ab+"', "'ab+'",
-    '"r+b"', "'r+b'", '"w+b"', "'w+b'", '"a+b"', "'a+b'",
-    '"xb"', "'xb'", '"xb+"', "'xb+'", '"x+b"', "'x+b'",
-    '"br"', "'br'", '"bw"', "'bw'", '"ba"', "'ba'", '"bx"', "'bx'",
-    '"b"', "'b'",
-])
-
-
-
-_FSTRING_LOGGER_RE = re.compile(
-    r"\b(?:logger|_logger|log)\s*\.\s*"
-    r"(?:debug|info|warning|error|critical|exception)\s*\(\s*f[\"']"
-)
-
-
-
-_LEN_COMPARE_RE = re.compile(r"\blen\([^)]+\)\s*(?:==|!=|>)\s*0\b")
-
-
-
-_USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)(?<!")(?<!')f(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
-
-_PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
 
 
 

@@ -13,8 +13,6 @@ _RESET  = "\033[0m"
 _RED    = "\033[31m"
 _YELLOW = "\033[33m"
 _GREEN  = "\033[32m"
-_BOLD   = "\033[1m"
-_DIM    = "\033[2m"
 
 
 def _color_ok() -> bool:
@@ -33,14 +31,6 @@ def yellow(text: str) -> str:
 
 def green(text: str) -> str:
     return f"{_GREEN}{text}{_RESET}" if _color_ok() else text
-
-
-def bold(text: str) -> str:
-    return f"{_BOLD}{text}{_RESET}" if _color_ok() else text
-
-
-def dim(text: str) -> str:
-    return f"{_DIM}{text}{_RESET}" if _color_ok() else text
 
 
 def severity_color(sev: str, text: str) -> str:

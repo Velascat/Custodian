@@ -77,6 +77,7 @@ class VultureAdapter(ToolAdapter):
                 capture_output=True,
                 text=True,
                 cwd=repo_path,
+                timeout=120,
             )
         except FileNotFoundError:
             return [Finding.tool_unavailable(self.name)]

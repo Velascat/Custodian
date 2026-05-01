@@ -87,7 +87,7 @@ def run_repo_audit(
         tests_root=tests_root,
         config=config,
         plugin_modules=plugins,
-        graph=_build_analysis_graph(context=None, detectors=detectors,
+        graph=_build_analysis_graph(detectors=detectors,
                                     src_root=src_root, repo_root=repo_root,
                                     tests_root=tests_root),
     )
@@ -96,7 +96,6 @@ def run_repo_audit(
 
 
 def _build_analysis_graph(
-    context,
     detectors,
     src_root: Path,
     repo_root: Path,

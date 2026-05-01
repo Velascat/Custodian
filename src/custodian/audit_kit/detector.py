@@ -69,7 +69,6 @@ class Detector:
     # They still run by default for backward compat; pass skip_deprecated=True
     # to the runner (or --skip-deprecated on the CLI) to omit them.
     deprecated: bool = False
-    replaces: str = ""  # e.g. "ruff:T201" — which tool/rule replaces this
 
 
 @dataclass(frozen=True)
