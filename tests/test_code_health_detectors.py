@@ -58,6 +58,16 @@ def test_c1_to_c8_detectors_on_fixture(tmp_path):
     assert by_id["C8"] == 1
 
 
+def test_c2_skips_commented_out_print(tmp_path):
+    ctx = _ctx(tmp_path, "# print('debug')\n# also: print('x')\nx = 1\n")
+    assert detect_c2(ctx).count == 0
+
+
+def test_c2_flags_real_print(tmp_path):
+    ctx = _ctx(tmp_path, "print('hello')\n")
+    assert detect_c2(ctx).count == 1
+
+
 def test_exclude_paths_skips_matched_files(tmp_path):
     """audit.exclude_paths.<id> filters specific files from a single detector."""
     src = tmp_path / "src"

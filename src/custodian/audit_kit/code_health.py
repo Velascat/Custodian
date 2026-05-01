@@ -99,14 +99,28 @@ def _py_files(context: AuditContext, detector_id: str | None = None) -> list[Pat
 _MAX_SAMPLES = 8
 
 
-def _count_pattern(paths: list[Path], pattern: re.Pattern[str]) -> DetectorResult:
+_COMMENT_LINE_RE = re.compile(r"^\s*#.*$", re.MULTILINE)
+
+
+def _strip_comment_lines(text: str) -> str:
+    """Remove pure-comment lines (lines whose first non-whitespace char is '#')."""
+    return _COMMENT_LINE_RE.sub("", text)
+
+
+def _count_pattern(
+    paths: list[Path],
+    pattern: re.Pattern[str],
+    *,
+    skip_comment_lines: bool = False,
+) -> DetectorResult:
     samples: list[str] = []
     count = 0
     for path in paths:
         try:
-            text = path.read_text(encoding="utf-8")
+            raw = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        text = _strip_comment_lines(raw) if skip_comment_lines else raw
         for match in pattern.finditer(text):
             count += 1
             if len(samples) < _MAX_SAMPLES:
@@ -153,19 +167,19 @@ def detect_c1(context: AuditContext) -> DetectorResult:
 
 
 def detect_c2(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C2"), re.compile(r"\bprint\("))
+    return _count_pattern(_py_files(context, "C2"), re.compile(r"\bprint\("), skip_comment_lines=True)
 
 
 def detect_c3(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C3"), re.compile(r"except\s*:\s*"))
+    return _count_pattern(_py_files(context, "C3"), re.compile(r"except\s*:\s*"), skip_comment_lines=True)
 
 
 def detect_c4(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C4"), re.compile(r"except[^\n]*:\n\s+pass"))
+    return _count_pattern(_py_files(context, "C4"), re.compile(r"except[^\n]*:\n\s+pass"), skip_comment_lines=True)
 
 
 def detect_c5(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C5"), re.compile(r"(pdb\.set_trace|breakpoint\()"))
+    return _count_pattern(_py_files(context, "C5"), re.compile(r"(pdb\.set_trace|breakpoint\()"), skip_comment_lines=True)
 
 
 def detect_c6(context: AuditContext) -> DetectorResult:
@@ -440,7 +454,7 @@ def detect_c18(context: AuditContext) -> DetectorResult:
     and sometimes used as doc templates) or f-strings containing backslash
     sequences.
     """
-    return _count_pattern(_py_files(context, "C18"), _USELESS_FSTRING_RE)
+    return _count_pattern(_py_files(context, "C18"), _USELESS_FSTRING_RE, skip_comment_lines=True)
 
 
 def detect_c17(context: AuditContext) -> DetectorResult:
@@ -472,6 +486,7 @@ def detect_c19(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C19"),
         re.compile(r"^\s+global\s+\w", re.MULTILINE),
+        skip_comment_lines=True,
     )
 
 
@@ -485,6 +500,7 @@ def detect_c20(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C20"),
         re.compile(r"\b(eval|exec)\s*\("),
+        skip_comment_lines=True,
     )
 
 
@@ -529,6 +545,7 @@ def detect_c22(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C22"),
         re.compile(r"\btime\.sleep\s*\("),
+        skip_comment_lines=True,
     )
 
 
@@ -542,6 +559,7 @@ def detect_c23(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C23"),
         re.compile(r"\bshell\s*=\s*True\b"),
+        skip_comment_lines=True,
     )
 
 
@@ -555,6 +573,7 @@ def detect_c24(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C24"),
         re.compile(r"\bpickle\.loads?\s*\("),
+        skip_comment_lines=True,
     )
 
 
@@ -568,6 +587,7 @@ def detect_c25(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C25"),
         re.compile(r"\braise\b.+\bfrom\s+None\b"),
+        skip_comment_lines=True,
     )
 
 
@@ -582,6 +602,7 @@ def detect_c26(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C26"),
         re.compile(r"\bos\.system\s*\("),
+        skip_comment_lines=True,
     )
 
 
