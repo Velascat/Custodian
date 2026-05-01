@@ -14,8 +14,9 @@ T1  Public src functions and classes with zero name references in tests.
 T2  Test functions with no assertion — a function whose name starts with
     ``test_`` and whose body contains no assertion mechanism.  Recognized
     assertion forms: ``assert`` statements, ``pytest.raises/warns/
-    deprecated_call`` context managers, and unittest-style ``self.assertX``
-    / ``self.failX`` calls.  Tests using only these forms are not flagged.
+    deprecated_call`` context managers, unittest-style ``self.assertX``
+    / ``self.failX`` calls, and Mock-style ``mock.assert_called_once()``
+    / ``mock.assert_not_called()`` / ``mock.assert_any_call()`` etc.
 """
 from __future__ import annotations
 
@@ -45,6 +46,8 @@ _PYTEST_ASSERTION_ATTRS = frozenset({
     "raises", "warns", "deprecated_call", "approx", "fail",
 })
 
+_MOCK_ASSERT_PREFIXES = ("assert_called", "assert_any_call", "assert_has_calls", "assert_not_called")
+
 
 def _has_assertion_mechanism(node: ast.AST) -> bool:
     """True if the subtree contains any recognized assertion mechanism.
@@ -53,6 +56,7 @@ def _has_assertion_mechanism(node: ast.AST) -> bool:
     - ast.Assert (``assert x``)
     - pytest.raises / pytest.warns / etc. (``with pytest.raises(...):`` or call)
     - self.assertX / self.failX (unittest-style)
+    - mock.assert_called_once() / mock.assert_not_called() / etc. (Mock-style)
     """
     for child in ast.walk(node):
         if isinstance(child, ast.Assert):
@@ -72,6 +76,9 @@ def _has_assertion_mechanism(node: ast.AST) -> bool:
         if isinstance(value, ast.Name) and value.id == "self":
             if attr.startswith("assert") or attr.startswith("fail"):
                 return True
+        # mock.assert_called_once() / mock.assert_not_called() / etc.
+        if any(attr.startswith(p) for p in _MOCK_ASSERT_PREFIXES):
+            return True
     return False
 
 

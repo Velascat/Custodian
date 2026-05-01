@@ -142,3 +142,32 @@ class TestT2:
                         raise ValueError()
         """, tmp_path)
         assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_mock_assert_called_once_not_flagged(self, tmp_path):
+        _write_test_file("""
+            from unittest.mock import MagicMock
+            def test_called():
+                m = MagicMock()
+                m()
+                m.assert_called_once()
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_mock_assert_not_called_not_flagged(self, tmp_path):
+        _write_test_file("""
+            from unittest.mock import MagicMock
+            def test_not_called():
+                m = MagicMock()
+                m.assert_not_called()
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
+
+    def test_mock_assert_called_once_with_not_flagged(self, tmp_path):
+        _write_test_file("""
+            from unittest.mock import MagicMock
+            def test_args():
+                m = MagicMock()
+                m(42)
+                m.assert_called_once_with(42)
+        """, tmp_path)
+        assert detect_t2(_ctx(tmp_path)).count == 0
