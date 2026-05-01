@@ -55,5 +55,7 @@ def load_detectors(config: dict) -> list[Detector]:
         produced = contributor()
         if not isinstance(produced, list) or not all(isinstance(d, Detector) for d in produced):
             raise TypeError(f"Detector contributor '{target}' must return list[Detector]")
+        for d in produced:
+            d.source = "custom"
         detectors.extend(produced)
     return detectors

@@ -69,6 +69,11 @@ class Detector:
     # They still run by default for backward compat; pass skip_deprecated=True
     # to the runner (or --skip-deprecated on the CLI) to omit them.
     deprecated: bool = False
+    # source tracks where this detector originates:
+    #   "builtin"  — Custodian's own AST-based detectors (C, D, S, U, T, G, A, I-class)
+    #   "custom"   — repo-specific plugin from _custodian/ (set by plugin loader)
+    #   "adapter"  — wraps an external tool (RUFF, MYPY, VULTURE, TY, SEMGREP)
+    source: str = "builtin"
 
 
 @dataclass(frozen=True)
@@ -126,6 +131,7 @@ def run_audit(
             "description": detector.description,
             "status": detector.status,
             "severity": detector.severity,
+            "source": detector.source,
             "count": detector_result.count,
             "samples": detector_result.samples,
         }

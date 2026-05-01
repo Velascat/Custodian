@@ -17,6 +17,12 @@ dev = [
     "pytest>=8",
     "ruff>=0.5",
 ]
+# Tool adapters — install to enable adapter-backed detection
+tools = [
+    "mypy>=1.8",
+    "vulture>=2.11",
+    # ty is from Astral (uv install ty); add if using ty adapter
+]
 
 [project.scripts]
 custodian-audit = "custodian.cli.audit:main"

@@ -17,6 +17,7 @@ from custodian.audit_kit.detectors.imports import build_import_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.detectors.test_shape import build_test_shape_detectors
+from custodian.adapters.registry import get_enabled_adapters
 from custodian.audit_kit.result import AuditResult
 from custodian.plugins.loader import load_detectors, load_plugins
 
@@ -91,8 +92,52 @@ def run_repo_audit(
                                     src_root=src_root, repo_root=repo_root,
                                     tests_root=tests_root),
     )
-    return run_audit(context=context, detectors=detectors, min_severity=min_severity,
-                     skip_deprecated=skip_deprecated)
+    result = run_audit(context=context, detectors=detectors, min_severity=min_severity,
+                       skip_deprecated=skip_deprecated)
+
+    # Run enabled tool adapters and merge findings into result
+    _run_adapters(result, repo_root=repo_root, config=config)
+    return result
+
+
+def _run_adapters(result: AuditResult, *, repo_root: Path, config: dict) -> None:
+    """Run each enabled adapter and append grouped findings to result.patterns."""
+    adapters = get_enabled_adapters(config)
+    if not adapters:
+        return
+
+    for adapter in adapters:
+        tool_id = adapter.name.upper()
+        if not adapter.is_available():
+            result.patterns[tool_id] = {
+                "description": f"{adapter.name} (not installed)",
+                "status": "skipped",
+                "severity": "low",
+                "source": "adapter",
+                "count": 0,
+                "samples": [f"{adapter.name!r} is not installed — install it to enable findings"],
+            }
+            continue
+
+        findings = adapter.run(repo_root, config)
+
+        # Filter out TOOL_UNAVAILABLE sentinel (shouldn't happen, but be safe)
+        real = [f for f in findings if f.rule != "TOOL_UNAVAILABLE"]
+
+        samples = [
+            f"{f.path or '?'}:{f.line or '?'}: [{f.rule}] {f.message}"
+            for f in real[:8]
+        ]
+        count = len(real)
+        result.patterns[tool_id] = {
+            "description": f"{adapter.name} findings",
+            "status": "open" if count else "pass",
+            "severity": "medium",
+            "source": "adapter",
+            "count": count,
+            "samples": samples,
+        }
+        result.total_findings += count
 
 
 def _build_analysis_graph(

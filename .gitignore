@@ -24,3 +24,6 @@ build/
 .idea/
 .DS_Store
 *.swp
+
+# Warehouse data (generated artifacts gitignored via .warehouse/yard/*/.gitignore)
+.warehouse/yard/

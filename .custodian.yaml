@@ -90,3 +90,12 @@ audit:
       - src/custodian/plugins/protocols.py
       # SARIF report writer is an optional output format; tested through CLI integration.
       - src/custodian/reports/sarif_report.py
+
+# Tool adapters — run external tools alongside AST-based detectors.
+# Results appear in audit output with source: "adapter".
+tools:
+  ruff: true
+  vulture: true
+  # mypy: true          # enable when stubs / type annotations are in place
+  # ty: true            # Astral's faster type-checker; enable when annotations land
+  # semgrep: true       # requires rules/semgrep/ directory with .yaml rule files
