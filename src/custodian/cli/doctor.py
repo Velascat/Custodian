@@ -8,7 +8,9 @@ from pathlib import Path
 
 from custodian.audit_kit.code_health import build_code_health_detectors
 from custodian.audit_kit.detectors.annotations import build_annotation_detectors
+from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
+from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.detectors.test_shape import build_test_shape_detectors
@@ -22,6 +24,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset({
 })
 _KNOWN_AUDIT_KEYS = frozenset({
     "exclude_paths", "stale_handlers", "common_words",
+    "x1_threshold", "x2_threshold",
     # plugin-extension keys (plugins may declare arbitrary audit sub-keys)
     "plugin_audit_keys",
 })
@@ -150,6 +153,8 @@ def main():
                                 + build_dead_code_detectors()
                                 + build_test_shape_detectors()
                                 + build_annotation_detectors()
+                                + build_complexity_detectors()
+                                + build_ghost_detectors()
                                 + extra)}
     exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
     if isinstance(exclude_paths, dict):

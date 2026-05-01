@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from custodian.audit_kit.passes.import_graph import ImportGraph
     from custodian.audit_kit.passes.ast_forest import AstForest
     from custodian.audit_kit.passes.call_graph import CallGraph
+    from custodian.audit_kit.passes.symbol_index import SymbolIndex
+    from custodian.audit_kit.passes.tests_forest import TestsForest
 
 # Severity constants — use these names in Detector definitions
 HIGH   = "high"
@@ -33,10 +35,14 @@ class AnalysisGraph:
       ``"import_graph"``  — module-level import relationships
       ``"ast_forest"``    — pre-parsed ASTs for every .py file in src_root
       ``"call_graph"``    — static call-graph: defined names, call sites, attr accesses
+      ``"symbol_index"``  — all defined names + all text tokens across src
+      ``"tests_forest"``  — pre-parsed ASTs for every .py file in tests_root
     """
     import_graph: ImportGraph | None = None
     ast_forest: AstForest | None = None
     call_graph: CallGraph | None = None
+    symbol_index: SymbolIndex | None = None
+    tests_forest: TestsForest | None = None
 
 
 @dataclass

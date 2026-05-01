@@ -138,6 +138,9 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C20", "eval() or exec() call in source",                 "open",     detect_c20,  HIGH),
         Detector("C21", "mutable default argument (list, dict, or set)",   "open",     detect_c21,  HIGH),
         Detector("C22", "time.sleep() call in source (busy-wait smell)",   "open",     detect_c22,  LOW),
+        Detector("C23", "subprocess called with shell=True",               "open",     detect_c23,  HIGH),
+        Detector("C24", "pickle.load/loads usage (unsafe deserialization)","open",     detect_c24,  HIGH),
+        Detector("C25", "raise ... from None (suppresses exception chain)","open",     detect_c25,  LOW),
     ]
 
 
@@ -522,6 +525,45 @@ def detect_c22(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C22"),
         re.compile(r"\btime\.sleep\s*\("),
+    )
+
+
+def detect_c23(context: AuditContext) -> DetectorResult:
+    """Flag ``subprocess`` calls with ``shell=True``.
+
+    ``shell=True`` passes the command through the shell interpreter, opening
+    a command-injection vector if any part of the command string is derived
+    from user input.  Use a list of arguments with ``shell=False`` instead.
+    """
+    return _count_pattern(
+        _py_files(context, "C23"),
+        re.compile(r"\bshell\s*=\s*True\b"),
+    )
+
+
+def detect_c24(context: AuditContext) -> DetectorResult:
+    """Flag ``pickle.load`` and ``pickle.loads`` usage.
+
+    Unpickling data from untrusted sources allows arbitrary code execution.
+    Prefer safer serialization formats (json, msgpack) or cryptographically
+    authenticated pickle streams.
+    """
+    return _count_pattern(
+        _py_files(context, "C24"),
+        re.compile(r"\bpickle\.loads?\s*\("),
+    )
+
+
+def detect_c25(context: AuditContext) -> DetectorResult:
+    """Flag ``raise X from None`` — explicit exception chain suppression.
+
+    ``from None`` intentionally hides the original exception context.
+    Legitimate uses exist (e.g. re-raising with a cleaner API boundary
+    message), but accidental use discards useful debugging information.
+    """
+    return _count_pattern(
+        _py_files(context, "C25"),
+        re.compile(r"\braise\b.+\bfrom\s+None\b"),
     )
 
 

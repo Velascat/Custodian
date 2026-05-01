@@ -10,7 +10,9 @@ import yaml
 from custodian.audit_kit.code_health import build_code_health_detectors
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext, run_audit
 from custodian.audit_kit.detectors.annotations import build_annotation_detectors
+from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
+from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.detectors.test_shape import build_test_shape_detectors
@@ -60,6 +62,8 @@ def run_repo_audit(
                   + build_dead_code_detectors()
                   + build_test_shape_detectors()
                   + build_annotation_detectors()
+                  + build_complexity_detectors()
+                  + build_ghost_detectors()
                   + extra)
 
     if only:
@@ -72,7 +76,8 @@ def run_repo_audit(
         config=config,
         plugin_modules=plugins,
         graph=_build_analysis_graph(context=None, detectors=detectors,
-                                    src_root=src_root, repo_root=repo_root),
+                                    src_root=src_root, repo_root=repo_root,
+                                    tests_root=tests_root),
     )
     return run_audit(context=context, detectors=detectors, min_severity=min_severity)
 
@@ -82,6 +87,7 @@ def _build_analysis_graph(
     detectors,
     src_root: Path,
     repo_root: Path,
+    tests_root: Path | None = None,
 ) -> AnalysisGraph:
     needed: set[str] = set()
     for d in detectors:
@@ -102,5 +108,13 @@ def _build_analysis_graph(
     if "call_graph" in needed:
         from custodian.audit_kit.passes.call_graph import build_call_graph
         graph.call_graph = build_call_graph(src_root)
+
+    if "symbol_index" in needed:
+        from custodian.audit_kit.passes.symbol_index import build_symbol_index
+        graph.symbol_index = build_symbol_index(src_root)
+
+    if "tests_forest" in needed and tests_root is not None:
+        from custodian.audit_kit.passes.tests_forest import build_tests_forest
+        graph.tests_forest = build_tests_forest(tests_root)
 
     return graph

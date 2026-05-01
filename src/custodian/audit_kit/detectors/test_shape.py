@@ -4,6 +4,13 @@
 
 Detectors
 ─────────
+T1  Public src functions and classes with zero name references in tests.
+    Uses the tests_forest pass to collect all ast.Name occurrences in
+    test files, then flags public src symbols whose name never appears.
+    Conservative: only checks module-level definitions, excludes private
+    names and dunder names.  LOW severity — indirect testing via wrappers
+    and integration tests will produce false positives.
+
 T2  Test functions with no assertion — a function whose name starts with
     ``test_`` and whose body contains no ``assert`` statement (ast.Assert).
     These are most likely forgotten stubs or tests that lost their
@@ -20,10 +27,13 @@ from custodian.audit_kit.detector import (
 )
 
 _MAX_SAMPLES = 8
+_NEEDS_TF = frozenset({"ast_forest", "tests_forest"})
 
 
 def build_test_shape_detectors() -> list[Detector]:
     return [
+        Detector("T1", "public src symbol with no reference in tests", "open",
+                 detect_t1, LOW, _NEEDS_TF),
         Detector("T2", "test function with no assert statement", "open",
                  detect_t2, LOW),
     ]
@@ -53,6 +63,45 @@ def _parse_test_files(tests_root: Path) -> list[tuple[Path, ast.Module]]:
             continue
         results.append((path, tree))
     return results
+
+
+# ── T1 ────────────────────────────────────────────────────────────────────────
+
+def detect_t1(context: AuditContext) -> DetectorResult:
+    """Flag public src functions/classes whose name never appears in any test file."""
+    if (context.graph is None
+            or context.graph.ast_forest is None
+            or context.graph.tests_forest is None):
+        return DetectorResult(count=0, samples=[])
+
+    # Collect every ast.Name id that appears anywhere in tests
+    test_name_refs: set[str] = set()
+    for _path, tree, _src in context.graph.tests_forest.items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                test_name_refs.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                test_name_refs.add(node.attr)
+
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel = path.relative_to(context.repo_root)
+        for stmt in tree.body:  # module-level only
+            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            name = stmt.name
+            if name.startswith("_"):
+                continue
+            if name in test_name_refs:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                kind = "class" if isinstance(stmt, ast.ClassDef) else "def"
+                samples.append(f"{rel}:{stmt.lineno}: {kind} {name} — no test reference")
+
+    return DetectorResult(count=count, samples=samples)
 
 
 # ── T2 ────────────────────────────────────────────────────────────────────────
