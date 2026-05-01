@@ -167,7 +167,26 @@ def detect_c1(context: AuditContext) -> DetectorResult:
 
 
 def detect_c2(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C2"), re.compile(r"\bprint\("), skip_comment_lines=True)
+    """Flag bare print() calls in source (AST-based, skips string literals)."""
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C2"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "print"
+            ):
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(f"{rel}:{node.lineno}: print(")
+    return DetectorResult(count=count, samples=samples)
 
 
 def detect_c3(context: AuditContext) -> DetectorResult:
