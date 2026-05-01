@@ -22,6 +22,7 @@ dev = [
 custodian-audit = "custodian.cli.audit:main"
 custodian-doctor = "custodian.cli.doctor:main"
 custodian-multi = "custodian.cli.multi:main"
+custodian-fix = "custodian.cli.fix:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
