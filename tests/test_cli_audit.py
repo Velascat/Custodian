@@ -19,12 +19,12 @@ class TestOnlyFilter:
     def test_only_restricts_to_named_detector(self):
         result = run_repo_audit(FIXTURE_REPO, only={"C1"})
         assert "C1" in result.patterns
-        assert "C2" not in result.patterns
-        assert "C3" not in result.patterns
+        assert "C11" not in result.patterns
+        assert "C28" not in result.patterns
 
     def test_only_accepts_multiple_codes(self):
-        result = run_repo_audit(FIXTURE_REPO, only={"C1", "C2"})
-        assert set(result.patterns.keys()) == {"C1", "C2"}
+        result = run_repo_audit(FIXTURE_REPO, only={"C1", "C6"})
+        assert set(result.patterns.keys()) == {"C1", "C6"}
 
     def test_only_unknown_code_produces_empty_result(self):
         result = run_repo_audit(FIXTURE_REPO, only={"ZZNOTREAL"})
@@ -52,10 +52,10 @@ class TestFindingsList:
             assert "sample" in finding
 
     def test_findings_code_matches_pattern(self):
-        result = run_repo_audit(FIXTURE_REPO, only={"C1", "C2"})
+        result = run_repo_audit(FIXTURE_REPO, only={"C1", "C6"})
         data = json.loads(result.to_json())
         for finding in data["findings"]:
-            assert finding["code"] in {"C1", "C2"}
+            assert finding["code"] in {"C1", "C6"}
 
     def test_findings_empty_when_no_samples(self):
         result = run_repo_audit(FIXTURE_REPO, only={"ZZNOTREAL"})
@@ -140,12 +140,12 @@ class TestListDetectors:
             main()
         out = capsys.readouterr().out
         assert "C1" in out
-        assert "C2" in out
+        assert "C6" in out
         assert "SEV" in out  # header row
         # Must not include JSON (not running an audit)
         assert '"schema_version"' not in out
 
-    def test_list_detectors_shows_all_generic_codes(self, capsys):
+    def test_list_detectors_shows_all_active_codes(self, capsys):
         from custodian.cli.audit import main
 
         with patch("sys.argv", [
@@ -153,7 +153,7 @@ class TestListDetectors:
         ]):
             main()
         out = capsys.readouterr().out
-        for code in ("C1", "C2", "C3", "C9", "C13", "C15"):
+        for code in ("C1", "C6", "C8", "C11", "C28", "C29", "C32", "C33"):
             assert code in out
 
 

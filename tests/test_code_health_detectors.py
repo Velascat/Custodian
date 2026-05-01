@@ -53,22 +53,6 @@ def test_non_deprecated_detectors_on_fixture(tmp_path):
     assert by_id["C11"] == 1
 
 
-def test_deprecated_detectors_return_zero(tmp_path):
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "sample.py").write_text(
-        "print('x')\nexcept:\n    pass\nbreakpoint()\n", encoding="utf-8"
-    )
-    context = AuditContext(
-        repo_root=tmp_path, src_root=src, tests_root=tmp_path / "tests",
-        config={}, plugin_modules=[],
-    )
-    by_id = {det.id: det.detect(context).count for det in build_code_health_detectors()}
-    for code in ("C2", "C3", "C4", "C5", "C7", "C9", "C10", "C12", "C13",
-                 "C14", "C15", "C16", "C17", "C18", "C19", "C20", "C21",
-                 "C22", "C23", "C24", "C25", "C26", "C27", "C31"):
-        assert by_id.get(code, 0) == 0, f"{code} should return 0 (deprecated)"
-
 
 def test_exclude_paths_skips_matched_files(tmp_path):
     src = tmp_path / "src"

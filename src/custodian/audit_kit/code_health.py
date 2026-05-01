@@ -131,41 +131,14 @@ def _count_pattern(
 def build_code_health_detectors() -> list[Detector]:
     D = Detector
     return [
-        # --- custodian_hygiene (keep permanently) ---
-        D("C1",  "TODO markers in source",                          "open",     detect_c1,   LOW),
-        D("C6",  "FIXME markers",                                   "open",     detect_c6,   LOW),
-        D("C8",  "stale handler references",                        "partial",  detect_c8,   MEDIUM),
-        D("C11", "subprocess call without timeout",                 "open",     detect_c11,  MEDIUM),
-        D("C29", "file exceeds line-count threshold",               "open",     detect_c29,  LOW),
-        D("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open", detect_c33, LOW),
-        # --- semgrep (keep until Phase 4 Semgrep adapter is active) ---
-        D("C28", "hardcoded IP address in string literal",          "open",     detect_c28,  LOW),
-        D("C32", "hardcoded credential in assignment",              "open",     detect_c32,  HIGH),
-        # --- deprecated → ruff (kept running; skipped with --skip-deprecated) ---
-        D("C2",  "print statements in source",      "open", detect_c2,  MEDIUM, deprecated=True, replaces="ruff:T201"),
-        D("C3",  "bare except usage",               "open", detect_c3,  HIGH,   deprecated=True, replaces="ruff:E722"),
-        D("C4",  "pass statements in exception handlers", "partial", detect_c4, MEDIUM, deprecated=True, replaces="ruff:S110"),
-        D("C5",  "debugger breakpoints",            "open", detect_c5,  HIGH,   deprecated=True, replaces="ruff:T100"),
-        D("C7",  "assert True usage",               "deferred", detect_c7, LOW, deprecated=True, replaces="retire"),
-        D("C9",  "broad except Exception without a logger call", "open", detect_c9, HIGH, deprecated=True, replaces="ruff:BLE001"),
-        D("C10", "naive datetime.now() / utcnow() usage", "open", detect_c10, MEDIUM, deprecated=True, replaces="ruff:DTZ001"),
-        D("C12", "bare # type: ignore without error code", "open", detect_c12, LOW, deprecated=True, replaces="ruff:PGH003"),
-        D("C13", "assert used for runtime validation in src", "open", detect_c13, MEDIUM, deprecated=True, replaces="ruff:S101"),
-        D("C14", "open() call missing explicit encoding=", "open", detect_c14, MEDIUM, deprecated=True, replaces="ruff:PLW1514"),
-        D("C15", "f-string passed directly to logger call", "open", detect_c15, LOW, deprecated=True, replaces="ruff:G004"),
-        D("C16", "Path.read_text/write_text without encoding=", "open", detect_c16, LOW, deprecated=True, replaces="ruff:PLW1514"),
-        D("C17", "len(x) == 0 / len(x) > 0 (prefer truthiness)", "open", detect_c17, LOW, deprecated=True, replaces="ruff:PLC1802"),
-        D("C18", "f-string with no interpolation (drop the f)", "open", detect_c18, LOW, deprecated=True, replaces="ruff:F541"),
-        D("C19", "global statement in function body", "open", detect_c19, MEDIUM, deprecated=True, replaces="ruff:PLW0603"),
-        D("C20", "eval() or exec() call in source", "open", detect_c20, HIGH, deprecated=True, replaces="ruff:S307"),
-        D("C21", "mutable default argument (list, dict, or set)", "open", detect_c21, HIGH, deprecated=True, replaces="ruff:B006"),
-        D("C22", "time.sleep() call in source (busy-wait smell)", "open", detect_c22, LOW, deprecated=True, replaces="retire"),
-        D("C23", "subprocess called with shell=True", "open", detect_c23, HIGH, deprecated=True, replaces="ruff:S602"),
-        D("C24", "pickle.load/loads usage (unsafe deserialization)", "open", detect_c24, HIGH, deprecated=True, replaces="ruff:S301"),
-        D("C25", "raise ... from None (suppresses exception chain)", "open", detect_c25, LOW, deprecated=True, replaces="retire"),
-        D("C26", "os.system() call (prefer subprocess)", "open", detect_c26, MEDIUM, deprecated=True, replaces="ruff:S605"),
-        D("C27", "assert False / assert 0 as permanent sentinel", "open", detect_c27, LOW, deprecated=True, replaces="ruff:B011"),
-        D("C31", "weak hash algorithm (md5/sha1) without usedforsecurity=False", "open", detect_c31, HIGH, deprecated=True, replaces="ruff:S324"),
+        D("C1",  "TODO markers in source",                                          "open",    detect_c1,   LOW),
+        D("C6",  "FIXME markers",                                                   "open",    detect_c6,   LOW),
+        D("C8",  "stale handler references",                                        "partial", detect_c8,   MEDIUM),
+        D("C11", "subprocess call without timeout",                                 "open",    detect_c11,  MEDIUM),
+        D("C28", "hardcoded IP address in string literal",                          "open",    detect_c28,  LOW),
+        D("C29", "file exceeds line-count threshold",                               "open",    detect_c29,  LOW),
+        D("C32", "hardcoded credential in assignment",                              "open",    detect_c32,  HIGH),
+        D("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open",    detect_c33,  LOW),
     ]
 
 
@@ -173,28 +146,13 @@ def detect_c1(context: AuditContext) -> DetectorResult:
     return _count_pattern(_py_files(context, "C1"), re.compile(r"TODO"))
 
 
-def detect_c2(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
-def detect_c3(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c4(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c5(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 def detect_c6(context: AuditContext) -> DetectorResult:
     return _count_pattern(_py_files(context, "C6"), re.compile(r"FIXME"))
 
-
-def detect_c7(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 def detect_c8(context: AuditContext) -> DetectorResult:
@@ -244,9 +202,6 @@ def _extract_block(lines: list[str], except_lineno: int) -> str:
         block_lines.append(line)
     return "\n".join(block_lines)
 
-
-def detect_c9(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 _SUBPROCESS_CALL_RE = re.compile(
@@ -307,19 +262,10 @@ def detect_c11(context: AuditContext) -> DetectorResult:
     return DetectorResult(count=count, samples=samples)
 
 
-def detect_c12(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c10(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 _ASSERT_RE = re.compile(r"^\s+assert\s+", re.MULTILINE)
 
-
-def detect_c13(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 _OPEN_CALL_RE = re.compile(r"(?<![.\w])open\s*\(")
@@ -333,9 +279,6 @@ _BINARY_MODES = frozenset([
 ])
 
 
-def detect_c14(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
 
 _FSTRING_LOGGER_RE = re.compile(
     r"\b(?:logger|_logger|log)\s*\.\s*"
@@ -343,18 +286,9 @@ _FSTRING_LOGGER_RE = re.compile(
 )
 
 
-def detect_c15(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
 
 _LEN_COMPARE_RE = re.compile(r"\blen\([^)]+\)\s*(?:==|!=|>)\s*0\b")
 
-def detect_c18(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c17(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 _USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)(?<!")(?<!')f(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
@@ -362,40 +296,13 @@ _USELESS_FSTRING_RE = re.compile(r"""(?<!-)(?<!\w)(?<!")(?<!')f(?:"(?!"")[^"{\\\
 _PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
 
 
-def detect_c19(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
-def detect_c20(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
-def detect_c21(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
-def detect_c22(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
-
-def detect_c23(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c24(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c25(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c26(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
-
-def detect_c27(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 def detect_c28(context: AuditContext) -> DetectorResult:
@@ -471,14 +378,8 @@ def _top_level_arg_count(call_body: str) -> int:
     return commas + 1 if body.strip() else 0
 
 
-def detect_c16(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
-
 
 # ── C31: weak hash algorithms ─────────────────────────────────────────────────
-
-def detect_c31(context: AuditContext) -> DetectorResult:
-    return DetectorResult(count=0, samples=[])
 
 
 # ── C32: hardcoded credentials ────────────────────────────────────────────────
