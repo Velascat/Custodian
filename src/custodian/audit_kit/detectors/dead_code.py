@@ -96,6 +96,8 @@ def detect_d1(context: AuditContext) -> DetectorResult:
             continue
         if name in all_calls:
             continue
+        if name in cg.framework_decorated:
+            continue
         count += 1
         if len(samples) < _MAX_SAMPLES:
             samples.append(f"{name}() — defined but never called")

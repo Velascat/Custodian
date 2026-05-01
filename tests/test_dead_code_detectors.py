@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
-from custodian.audit_kit.detectors.dead_code import detect_d2, detect_d4, detect_f2
+from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_f2
 from custodian.audit_kit.passes.ast_forest import AstForest
+from custodian.audit_kit.passes.call_graph import build_call_graph
 
 
 def _forest_from_source(src: str, tmp_path: Path, name: str = "module.py") -> AstForest:
@@ -281,3 +282,44 @@ class TestF2:
         result = detect_f2(_make_context(tmp_path, forest))
         assert result.count == 1
         assert "_DEAD_CONSTANT" in result.samples[0]
+
+
+def _cg_context(tmp_path: Path, src_text: str) -> AuditContext:
+    src_root = tmp_path / "src"
+    src_root.mkdir(parents=True, exist_ok=True)
+    (src_root / "module.py").write_text(textwrap.dedent(src_text), encoding="utf-8")
+    cg = build_call_graph(src_root)
+    from custodian.audit_kit.detector import AnalysisGraph
+    graph = AnalysisGraph(call_graph=cg)
+    return AuditContext(
+        repo_root=tmp_path,
+        src_root=src_root,
+        tests_root=tmp_path / "tests",
+        config={},
+        plugin_modules=[],
+        graph=graph,
+    )
+
+
+class TestD1:
+    def test_uncalled_public_function_flagged(self, tmp_path):
+        ctx = _cg_context(tmp_path, "def orphan_func():\n    pass\n")
+        assert detect_d1(ctx).count == 1
+
+    def test_called_function_not_flagged(self, tmp_path):
+        ctx = _cg_context(tmp_path, "def used():\n    pass\nused()\n")
+        assert detect_d1(ctx).count == 0
+
+    def test_private_function_not_flagged(self, tmp_path):
+        ctx = _cg_context(tmp_path, "def _private():\n    pass\n")
+        assert detect_d1(ctx).count == 0
+
+    def test_framework_decorated_function_not_flagged(self, tmp_path):
+        src = "app = object()\n\n@app.command('run')\ndef cmd_run():\n    pass\n"
+        ctx = _cg_context(tmp_path, src)
+        assert detect_d1(ctx).count == 0
+
+    def test_pytest_decorated_function_not_flagged(self, tmp_path):
+        src = "import pytest\n\n@pytest.fixture\ndef my_fixture():\n    pass\n"
+        ctx = _cg_context(tmp_path, src)
+        assert detect_d1(ctx).count == 0

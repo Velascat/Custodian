@@ -48,6 +48,7 @@ class CallGraph:
     accessed_attrs: set[str] = field(default_factory=set)
     defined_in_all: set[str] = field(default_factory=set)
     decorated_names: set[str] = field(default_factory=set)
+    framework_decorated: set[str] = field(default_factory=set)
 
 
 def build_call_graph(src_root: Path) -> CallGraph:
@@ -66,10 +67,17 @@ def build_call_graph(src_root: Path) -> CallGraph:
 
 
 def _collect_from_module(tree: ast.Module, cg: CallGraph) -> None:
+    _PURE_DECORATORS = frozenset({"staticmethod", "classmethod", "property", "override", "abstractmethod", "final"})
+
     # Module-level definitions (not nested inside a class/function)
     for stmt in tree.body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             cg.module_functions.add(stmt.name)
+            for dec in stmt.decorator_list:
+                dec_name = dec.id if isinstance(dec, ast.Name) else None
+                if dec_name not in _PURE_DECORATORS:
+                    cg.framework_decorated.add(stmt.name)
+                    break
         if isinstance(stmt, ast.Assign):
             for target in stmt.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
