@@ -570,6 +570,38 @@ def _expand_model_validate_classes(src_root: Path, seed: set[str]) -> set[str]:
     return expanded
 
 
+def _scan_validate_wrappers(src_root: Path, func_names: list[str]) -> set[str]:
+    """Find class names passed as the first arg to custom model_validate wrappers.
+
+    Detects the pattern: ``model_validate(ClassName, data)`` where
+    ``model_validate`` is a project-specific free function wrapper around
+    Pydantic's ``ClassName.model_validate(data)``.  The function names to
+    scan for are declared in ``audit.f3_validate_functions`` in
+    ``.custodian.yaml``.
+    """
+    if not func_names:
+        return set()
+    func_set = set(func_names)
+    found: set[str] = set()
+    for path in sorted(src_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Name) and func.id in func_set):
+                continue
+            if node.args and isinstance(node.args[0], ast.Name):
+                found.add(node.args[0].id)
+    return found
+
+
 def detect_f3(context: AuditContext) -> DetectorResult:
     """Flag Pydantic BaseModel/BaseSettings fields never accessed as attributes."""
     if context.graph is None or context.graph.call_graph is None:
@@ -577,13 +609,15 @@ def detect_f3(context: AuditContext) -> DetectorResult:
 
     cg = context.graph.call_graph
     field_map = _pydantic_field_names(context.src_root)  # field_name → set of class names
-    # Expand: nested Pydantic models under deserialized classes are also schema fields
-    model_validate_classes = _expand_model_validate_classes(
-        context.src_root, cg.model_validate_classes
-    )
 
     audit_cfg: dict = context.config.get("audit") or {}
     exempt: set[str] = set(audit_cfg.get("f3_exempt") or [])
+    validate_fns: list[str] = list(audit_cfg.get("f3_validate_functions") or [])
+
+    # Expand: nested Pydantic models under deserialized classes are also schema fields.
+    # Also include classes passed as first arg to custom model_validate wrappers.
+    seed = cg.model_validate_classes | _scan_validate_wrappers(context.src_root, validate_fns)
+    model_validate_classes = _expand_model_validate_classes(context.src_root, seed)
 
     samples: list[str] = []
     count = 0
