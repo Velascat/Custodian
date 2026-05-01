@@ -4,29 +4,27 @@
 
 _(none)_
 
-## Up Next
+## Refactor — Master Phase List (Custodian → Orchestration Engine)
 
-**New detectors — ranked by value/feasibility**
+Architecture is locked. Custodian becomes orchestrator + policy engine; detection delegates to Ruff, Semgrep, ty, Vulture.
+Design artifact: `docs/design/detector_disposition_matrix.md` (committed 984c000)
 
-- **P1**: Protocol contract check — if a class has a Protocol base, verify all abstract methods are non-stub and signature matches. Needs `_protocol_classes()` + `_containing_class()` from stubs.py.
-- **N1**: Naming convention — bool-returning functions without `is_`/`has_`/`can_` prefix; bool params without those prefixes. AST-based.
-- **C30**: `random` usage outside test contexts (prefer `secrets` for security-sensitive code).
-
-**Coverage gaps (not currently detected)**
-- Flow audits: no reachability, no missing-error-path, no constant-return analysis
-- Pipeline completeness: no "Stage A produces X, Stage B consumes X — is X ever produced?" graph tracking
-- Config key liveness: `config["key"]` subscript invisible to call_graph
-- Protocol contract: U1-U3 catch stub shape but don't verify signature matches Protocol
-- Duplicate/near-duplicate code: needs hash/similarity pass — high complexity
-- Docstring drift: no param-name vs signature check — needs docstring parser
-- Resource lifecycle: no unclosed file/connection detection
-- Feature flag liveness: no unused/always-true flag detection
-
-**Custodian improvements**
-- C23 AST upgrade: regex matches "shell=True" in docstrings; AST-based would eliminate the false positive (see executor.py)
-- I1: multi-line import spanning lines — `from x import (\n  a, b\n)` not caught since lineno points to first line only
-- D1 per-file context: call_graph has no file info so exclude_paths doesn't work; store (file, name) pairs in module_functions to fix
-- D5/D6 string-based factory: class loaded via `"module.ClassName"` string (e.g. CoquiTTS registry) — still a false positive for D5
+**Phase 0 — Detector Disposition** ✅ DONE (committed 984c000)
+**Phase 1 — Core Abstractions** — `Finding` model, `ToolAdapter` interface, `runner.py` skeleton, config loader (old schema only)
+**Phase 2 — Ruff Adapter** — `adapters/ruff.py`, parse Ruff JSON → `Finding`, run parallel with existing detectors
+**Phase 3 — Ruff Migration** — mark overlapping C/I/X detectors deprecated, disable behind flag, parity-validate
+**Phase 4 — Semgrep Adapter** — `adapters/semgrep.py`, `rules/semgrep/` pack, migrate S3/AI1/AI3/C28/C32
+**Phase 5 — Policy Layer** — `policy/architecture_rules.py`, `policy/repo_rules.py`, `policy/hygiene_rules.py`
+**Phase 6 — Type Checking** — `adapters/ty.py` + `adapters/mypy.py` (fallback); remove E*, D3
+**Phase 7 — Dead Code** — optional Vulture adapter; D1/D5/F1/F2 → vulture advisory; D7 retired
+**Phase 8 — Codemod Separation** — `codemods/` via libcst; `custodian fix` / `custodian migrate` commands; audit never mutates
+**Phase 9 — Config Migration** — config normalizer; old schema → internal model; deprecation warnings; `custodian config migrate`
+**Phase 10 — Reporting** — JSON, SARIF, Markdown report builders
+**Phase 11 — Test Rewrite** — adapter/policy/config tests replace detector tests
+**Phase 12 — Detector Cleanup** — delete legacy AST detectors, shrink Custodian dramatically
+**Phase 13 — CLI Finalization** — `custodian audit / fix / migrate / report`
+**Phase 14 — Pre-commit Integration** — `.pre-commit-config.yaml` generation or adapter
+**Phase 15 — Multi-Repo Execution** — cross-repo invariants, aggregate reporting
 
 **Repo-level issues remaining**
 - VF: C9=289 (broad except), D1=~0 (bulk cleared round 9), D3=~40 missing NoReturn, D5=0 (resolved), D6=3 (DeliveryDTO/OutlineSection/NLTKCheckStage — false positives), D7=35 (keyword-only params, can't rename), F3=11 (MongoDB fields)
