@@ -225,11 +225,19 @@ def detect_d6(context: AuditContext) -> DetectorResult:
             or context.graph.ast_forest is None):
         return DetectorResult(count=0, samples=[])
 
+    audit_cfg: dict = context.config.get("audit") or {}
+    d6_globs: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("D6") or [])
+
     cg = context.graph.call_graph
     samples: list[str] = []
     count = 0
 
     for path, tree, _src in context.graph.ast_forest.items():
+        if d6_globs:
+            rel_str = str(path.relative_to(context.repo_root))
+            from pathlib import PurePosixPath
+            if any(PurePosixPath(rel_str).match(g) for g in d6_globs):
+                continue
         for stmt in tree.body:
             if not isinstance(stmt, ast.ClassDef):
                 continue
