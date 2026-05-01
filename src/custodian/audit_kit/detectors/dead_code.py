@@ -4,6 +4,11 @@
 
 Detectors
 ─────────
+D1  Module-level functions defined but never called within the same
+    codebase.  Uses the call-graph pass for cross-file analysis.
+    Conservative: only flags non-private, non-test, non-main functions.
+    Functions exported via ``__all__`` or used as decorators are excluded.
+
 D2  Dead else after terminal if-branch — an else clause present when the
     if-body always exits (return/raise/break/continue).  The else is
     structurally unreachable via the if-path and can be deleted, flattening
@@ -18,6 +23,11 @@ D4  Unreachable code after unconditional return/raise/break/continue.
     Any statement following a terminal in the same block can never execute.
     Recurses into nested if/for/while/try/with bodies but not into nested
     function or class definitions (separate scopes).
+
+F1  ``@dataclass`` fields never accessed as attributes anywhere in the
+    codebase.  Uses the call-graph pass to collect all attribute accesses.
+    Conservative: only flags fields whose name does not appear in any
+    attribute-load expression across all source files.
 
 F2  Private module-level constant defined but never referenced in the same
     file.  Matches _ALL_CAPS names at module scope.  Names in ``__all__``
@@ -34,21 +44,118 @@ from custodian.audit_kit.detector import (
 )
 
 _MAX_SAMPLES = 8
-_NEEDS = frozenset({"ast_forest"})
+_NEEDS_AST = frozenset({"ast_forest"})
+_NEEDS_CG  = frozenset({"call_graph"})
 _PRIVATE_CAPS = re.compile(r"^_[A-Z][A-Z0-9_]*$")
+
+# Module-level function names that should never be flagged as dead.
+_NEVER_DEAD = frozenset({
+    "main", "setup", "teardown", "conftest",
+    "__main__", "app", "create_app", "get_app",
+})
 
 
 def build_dead_code_detectors() -> list[Detector]:
     return [
+        Detector("D1", "module-level function defined but never called in codebase", "open",
+                 detect_d1, LOW, _NEEDS_CG),
         Detector("D2", "unnecessary else after terminal if-branch", "open",
-                 detect_d2, LOW, _NEEDS),
+                 detect_d2, LOW, _NEEDS_AST),
         Detector("D3", "function never returns normally — missing -> NoReturn", "open",
-                 detect_d3, LOW, _NEEDS),
+                 detect_d3, LOW, _NEEDS_AST),
         Detector("D4", "unreachable code after return/raise/break/continue", "open",
-                 detect_d4, MEDIUM, _NEEDS),
+                 detect_d4, MEDIUM, _NEEDS_AST),
+        Detector("F1", "dataclass field never accessed as attribute in codebase", "open",
+                 detect_f1, LOW, _NEEDS_CG),
         Detector("F2", "private module-level constant defined but never referenced", "open",
-                 detect_f2, LOW, _NEEDS),
+                 detect_f2, LOW, _NEEDS_AST),
     ]
+
+
+# ── D1 ────────────────────────────────────────────────────────────────────────
+
+def detect_d1(context: AuditContext) -> DetectorResult:
+    """Flag module-level functions never called anywhere in the codebase."""
+    if context.graph is None or context.graph.call_graph is None:
+        return DetectorResult(count=0, samples=[])
+
+    cg = context.graph.call_graph
+    all_calls = cg.called_names | cg.called_attrs | cg.decorated_names
+
+    samples: list[str] = []
+    count = 0
+
+    for name in sorted(cg.module_functions):
+        if name.startswith("_"):
+            continue
+        if name.startswith("test_"):
+            continue
+        if name in _NEVER_DEAD:
+            continue
+        if name in cg.defined_in_all:
+            continue
+        if name in all_calls:
+            continue
+        count += 1
+        if len(samples) < _MAX_SAMPLES:
+            samples.append(f"{name}() — defined but never called")
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── F1 ────────────────────────────────────────────────────────────────────────
+
+def _dataclass_field_names(src_root: Path) -> set[str]:
+    """Collect all field names defined in @dataclass classes across src_root."""
+    fields: set[str] = set()
+    for path in sorted(src_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any(
+                (isinstance(d, ast.Name) and d.id == "dataclass")
+                or (isinstance(d, ast.Attribute) and d.attr == "dataclass")
+                for d in node.decorator_list
+            ):
+                continue
+            for stmt in node.body:
+                if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                    fields.add(stmt.target.id)
+                elif isinstance(stmt, ast.Assign):
+                    for t in stmt.targets:
+                        if isinstance(t, ast.Name) and not t.id.startswith("_"):
+                            fields.add(t.id)
+    return fields
+
+
+def detect_f1(context: AuditContext) -> DetectorResult:
+    """Flag @dataclass fields never accessed as attributes anywhere in the codebase."""
+    if context.graph is None or context.graph.call_graph is None:
+        return DetectorResult(count=0, samples=[])
+
+    cg = context.graph.call_graph
+    field_names = _dataclass_field_names(context.src_root)
+
+    samples: list[str] = []
+    count = 0
+
+    for name in sorted(field_names):
+        if name.startswith("_"):
+            continue
+        if name in cg.accessed_attrs:
+            continue
+        count += 1
+        if len(samples) < _MAX_SAMPLES:
+            samples.append(f"{name} — dataclass field never accessed as attribute")
+
+    return DetectorResult(count=count, samples=samples)
 
 
 # ── AST helpers ───────────────────────────────────────────────────────────────

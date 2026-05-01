@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from custodian.audit_kit.code_health import build_code_health_detectors
+from custodian.audit_kit.detectors.annotations import build_annotation_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
@@ -148,6 +149,7 @@ def main():
                                 + build_stub_detectors()
                                 + build_dead_code_detectors()
                                 + build_test_shape_detectors()
+                                + build_annotation_detectors()
                                 + extra)}
     exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
     if isinstance(exclude_paths, dict):

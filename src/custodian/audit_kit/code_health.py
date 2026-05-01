@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Velascat
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import re
 
@@ -135,6 +136,8 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C18", "f-string with no interpolation (drop the f)",     "open",     detect_c18,  LOW),
         Detector("C19", "global statement in function body",               "open",     detect_c19,  MEDIUM),
         Detector("C20", "eval() or exec() call in source",                 "open",     detect_c20,  HIGH),
+        Detector("C21", "mutable default argument (list, dict, or set)",   "open",     detect_c21,  HIGH),
+        Detector("C22", "time.sleep() call in source (busy-wait smell)",   "open",     detect_c22,  LOW),
     ]
 
 
@@ -475,6 +478,50 @@ def detect_c20(context: AuditContext) -> DetectorResult:
     return _count_pattern(
         _py_files(context, "C20"),
         re.compile(r"\b(eval|exec)\s*\("),
+    )
+
+
+def detect_c21(context: AuditContext) -> DetectorResult:
+    """Flag function definitions with mutable default arguments.
+
+    A mutable default (``[]``, ``{}``, ``set()``) is shared across all calls
+    and mutated in place, which is almost always a bug.  The canonical fix is
+    to use ``None`` and initialize inside the body.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C21"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            all_defaults = list(node.args.defaults) + [
+                d for d in node.args.kw_defaults if d is not None
+            ]
+            for default in all_defaults:
+                if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(f"{rel}:{node.lineno}: {node.name}()")
+                    break  # one flag per function is enough
+    return DetectorResult(count=count, samples=samples)
+
+
+def detect_c22(context: AuditContext) -> DetectorResult:
+    """Flag ``time.sleep()`` calls in source (not tests).
+
+    ``time.sleep`` in production code is almost always a polling or
+    busy-wait pattern — a sign that an event, callback, or async
+    mechanism would be more appropriate.
+    """
+    return _count_pattern(
+        _py_files(context, "C22"),
+        re.compile(r"\btime\.sleep\s*\("),
     )
 
 

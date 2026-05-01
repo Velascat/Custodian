@@ -9,6 +9,7 @@ import yaml
 
 from custodian.audit_kit.code_health import build_code_health_detectors
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext, run_audit
+from custodian.audit_kit.detectors.annotations import build_annotation_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
@@ -58,6 +59,7 @@ def run_repo_audit(
                   + build_stub_detectors()
                   + build_dead_code_detectors()
                   + build_test_shape_detectors()
+                  + build_annotation_detectors()
                   + extra)
 
     if only:
@@ -96,5 +98,9 @@ def _build_analysis_graph(
     if "ast_forest" in needed:
         from custodian.audit_kit.passes.ast_forest import build_ast_forest
         graph.ast_forest = build_ast_forest(src_root)
+
+    if "call_graph" in needed:
+        from custodian.audit_kit.passes.call_graph import build_call_graph
+        graph.call_graph = build_call_graph(src_root)
 
     return graph
