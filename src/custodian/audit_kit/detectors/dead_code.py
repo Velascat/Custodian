@@ -9,6 +9,11 @@ D2  Dead else after terminal if-branch — an else clause present when the
     structurally unreachable via the if-path and can be deleted, flattening
     the indentation level.  Only flagged inside function bodies.
 
+D3  Functions that never return normally — every code path ends with
+    ``raise`` or a call to ``sys.exit``/``exit``/``quit``.  These should
+    be annotated ``-> NoReturn``.  Functions already annotated NoReturn or
+    Never are excluded.  Excludes @abstractmethod and Protocol methods.
+
 D4  Unreachable code after unconditional return/raise/break/continue.
     Any statement following a terminal in the same block can never execute.
     Recurses into nested if/for/while/try/with bodies but not into nested
@@ -37,6 +42,8 @@ def build_dead_code_detectors() -> list[Detector]:
     return [
         Detector("D2", "unnecessary else after terminal if-branch", "open",
                  detect_d2, LOW, _NEEDS),
+        Detector("D3", "function never returns normally — missing -> NoReturn", "open",
+                 detect_d3, LOW, _NEEDS),
         Detector("D4", "unreachable code after return/raise/break/continue", "open",
                  detect_d4, MEDIUM, _NEEDS),
         Detector("F2", "private module-level constant defined but never referenced", "open",
@@ -68,6 +75,90 @@ def _stmts_of(stmt: ast.stmt) -> list[list[ast.stmt]]:
     if isinstance(stmt, ast.With):
         return [stmt.body]
     return []
+
+
+# ── D3 helpers ────────────────────────────────────────────────────────────────
+
+def _is_noreturn_call(stmt: ast.stmt) -> bool:
+    """True for bare calls to sys.exit / exit / quit / os._exit."""
+    if not isinstance(stmt, ast.Expr) or not isinstance(stmt.value, ast.Call):
+        return False
+    func = stmt.value.func
+    if isinstance(func, ast.Name) and func.id in {"exit", "quit"}:
+        return True
+    if isinstance(func, ast.Attribute) and func.attr in {"exit", "_exit"}:
+        return True
+    return False
+
+
+def _is_noreturn_terminal(stmt: ast.stmt) -> bool:
+    return isinstance(stmt, ast.Raise) or _is_noreturn_call(stmt)
+
+
+def _all_paths_noreturn(stmts: list[ast.stmt]) -> bool:
+    """True if every code path through stmts ends in raise or a sys.exit-style call."""
+    if not stmts:
+        return False
+    last = stmts[-1]
+    if _is_noreturn_terminal(last):
+        return True
+    if isinstance(last, ast.If):
+        # Without an else, the if-false path falls through — not NoReturn.
+        if not last.orelse:
+            return False
+        return _all_paths_noreturn(last.body) and _all_paths_noreturn(last.orelse)
+    if isinstance(last, ast.Try):
+        if not _all_paths_noreturn(last.body):
+            return False
+        for handler in last.handlers:
+            if not _all_paths_noreturn(handler.body):
+                return False
+        return True
+    return False
+
+
+def _has_decorator(func: ast.FunctionDef | ast.AsyncFunctionDef, *names: str) -> bool:
+    for dec in func.decorator_list:
+        dec_name = (dec.id if isinstance(dec, ast.Name)
+                    else dec.attr if isinstance(dec, ast.Attribute) else None)
+        if dec_name in names:
+            return True
+    return False
+
+
+def _protocol_class_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                base_name = (base.id if isinstance(base, ast.Name)
+                             else base.attr if isinstance(base, ast.Attribute) else None)
+                if base_name == "Protocol":
+                    names.add(node.name)
+    return names
+
+
+def _direct_class(
+    func: ast.FunctionDef | ast.AsyncFunctionDef,
+    tree: ast.Module,
+) -> ast.ClassDef | None:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if item is func:
+                    return node
+    return None
+
+
+def _is_annotated_noreturn(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    ann = func.returns
+    if ann is None:
+        return False
+    if isinstance(ann, ast.Name) and ann.id in {"NoReturn", "Never"}:
+        return True
+    if isinstance(ann, ast.Attribute) and ann.attr in {"NoReturn", "Never"}:
+        return True
+    return False
 
 
 # ── D2 ────────────────────────────────────────────────────────────────────────
@@ -111,6 +202,42 @@ def detect_d2(context: AuditContext) -> DetectorResult:
                 if len(samples) < _MAX_SAMPLES:
                     samples.append(
                         f"{rel}:{hit.lineno}: {node.name}() — else after terminal if"
+                    )
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D3 ────────────────────────────────────────────────────────────────────────
+
+def detect_d3(context: AuditContext) -> DetectorResult:
+    """Flag functions that never return normally but lack -> NoReturn."""
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel = path.relative_to(context.repo_root)
+        protocol_names = _protocol_class_names(tree)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if _has_decorator(node, "abstractmethod", "overload"):
+                continue
+            container = _direct_class(node, tree)
+            if container and container.name in protocol_names:
+                continue
+            if _is_annotated_noreturn(node):
+                continue
+            if not node.body:
+                continue
+            if _all_paths_noreturn(node.body):
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(
+                        f"{rel}:{node.lineno}: {node.name}() — never returns, missing -> NoReturn"
                     )
 
     return DetectorResult(count=count, samples=samples)

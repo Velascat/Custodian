@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 from custodian.audit_kit.code_health import build_code_health_detectors
+from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
+from custodian.audit_kit.detectors.test_shape import build_test_shape_detectors
 from custodian.cli import colors
 from custodian.cli.runner import load_config
 from custodian.plugins.loader import load_detectors, load_plugins
@@ -144,6 +146,8 @@ def main():
     known_ids = {d.id for d in (build_code_health_detectors()
                                 + build_structure_detectors()
                                 + build_stub_detectors()
+                                + build_dead_code_detectors()
+                                + build_test_shape_detectors()
                                 + extra)}
     exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
     if isinstance(exclude_paths, dict):

@@ -133,6 +133,8 @@ def build_code_health_detectors() -> list[Detector]:
         Detector("C16", "Path.read_text/write_text without encoding=",     "open",     detect_c16,  LOW),
         Detector("C17", "len(x) == 0 / len(x) > 0 (prefer truthiness)",   "open",     detect_c17,  LOW),
         Detector("C18", "f-string with no interpolation (drop the f)",     "open",     detect_c18,  LOW),
+        Detector("C19", "global statement in function body",               "open",     detect_c19,  MEDIUM),
+        Detector("C20", "eval() or exec() call in source",                 "open",     detect_c20,  HIGH),
     ]
 
 
@@ -447,6 +449,33 @@ def detect_c17(context: AuditContext) -> DetectorResult:
 _USELESS_FSTRING_RE = re.compile(r"""\bf(?:"(?!"")[^"{\\\n]*"|'(?!'')[^'{\\\n]*')""")
 
 _PATHLIB_TEXT_RE = re.compile(r"\.(?:read_text|write_text)\s*\(")
+
+
+def detect_c19(context: AuditContext) -> DetectorResult:
+    """Flag ``global`` statements inside function bodies.
+
+    Module-level ``global`` usage is rare and almost always a design smell.
+    Legitimate module-level assignments don't need the ``global`` keyword.
+    The regex targets lines where ``global`` appears as the first non-whitespace
+    keyword, which reliably matches the statement form and avoids comment hits.
+    """
+    return _count_pattern(
+        _py_files(context, "C19"),
+        re.compile(r"^\s+global\s+\w", re.MULTILINE),
+    )
+
+
+def detect_c20(context: AuditContext) -> DetectorResult:
+    """Flag ``eval()`` and ``exec()`` calls in source.
+
+    Both are dynamic code execution entry points and carry security risk
+    (arbitrary code execution if inputs are user-controlled) as well as
+    maintainability risk (analysis tools can't reason about evaluated strings).
+    """
+    return _count_pattern(
+        _py_files(context, "C20"),
+        re.compile(r"\b(eval|exec)\s*\("),
+    )
 
 
 def detect_c16(context: AuditContext) -> DetectorResult:
