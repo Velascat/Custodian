@@ -72,6 +72,10 @@ def main():
                         help="After the table, print per-repo finding details for repos with findings")
     parser.add_argument("--no-color", action="store_true",
                         help="Disable ANSI color output")
+    parser.add_argument("--skip-deprecated", action="store_true",
+                        help="Skip detectors marked deprecated")
+    parser.add_argument("--report-dir", type=Path, metavar="DIR",
+                        help="Write per-repo JSON reports to this directory")
     args = parser.parse_args()
 
     if args.no_color:
@@ -91,15 +95,23 @@ def main():
     if args.only:
         only = {c.strip() for c in args.only.split(",") if c.strip()}
 
+    skip_deprecated = getattr(args, "skip_deprecated", False)
+
     results = []
     errors = []
     for repo in repos:
         try:
-            result = run_repo_audit(repo, only=only, min_severity=args.min_severity)
+            result = run_repo_audit(
+                repo, only=only, min_severity=args.min_severity,
+                skip_deprecated=skip_deprecated,
+            )
             results.append((repo, result, None))
         except Exception as exc:  # noqa: BLE001
             results.append((repo, None, str(exc)))
             errors.append(repo)
+
+    if args.report_dir:
+        _write_multi_reports(results, args.report_dir)
 
     if args.json:
         out = []
@@ -193,6 +205,25 @@ def _print_verbose(results: list) -> None:
             for sample in pat.get("samples", [])[:5]:
                 print(f"        {sample}")
         print()
+
+
+def _write_multi_reports(results: list, report_dir: Path) -> None:
+    """Write per-repo JSON findings reports under report_dir/<repo-key>/."""
+    from custodian.reports.json_report import write_json_report
+    for repo, result, err in results:
+        if err or result is None:
+            continue
+        repo_key = result.repo_key or repo.name
+        out_dir = report_dir / repo_key
+        # Gather findings from pattern _findings lists if present
+        from custodian.core.finding import Finding
+        findings: list[Finding] = []
+        for pat in result.patterns.values():
+            raw = pat.get("_findings", [])
+            if isinstance(raw, list):
+                findings.extend(raw)
+        write_json_report(findings, out_dir, repo_key=repo_key)
+        print(f"Report: {out_dir / 'findings.json'}")
 
 
 if __name__ == "__main__":
