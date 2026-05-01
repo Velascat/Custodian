@@ -423,6 +423,11 @@ def test_c16_skips_read_bytes(tmp_path):
     assert detect_c16(ctx).count == 0
 
 
+def test_c16_skips_write_text_two_positional_args(tmp_path):
+    ctx = _ctx(tmp_path, 'audit.write_text("section.txt", piece_text)\n')
+    assert detect_c16(ctx).count == 0
+
+
 # ── C17: len(x) == 0 / len(x) > 0 comparisons ───────────────────────────────
 
 def test_c17_flags_len_eq_zero(tmp_path):

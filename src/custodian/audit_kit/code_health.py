@@ -694,6 +694,23 @@ def detect_c29(context: AuditContext) -> DetectorResult:
     return DetectorResult(count=count, samples=samples)
 
 
+def _top_level_arg_count(call_body: str) -> int:
+    """Count positional args by counting top-level commas before any keyword (=) arg."""
+    depth = 0
+    commas = 0
+    body = call_body[1:-1] if call_body.startswith("(") else call_body
+    for ch in body:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            commas += 1
+        elif ch == "=" and depth == 0:
+            break  # hit a keyword arg
+    return commas + 1 if body.strip() else 0
+
+
 def detect_c16(context: AuditContext) -> DetectorResult:
     """Flag ``Path.read_text()`` and ``Path.write_text()`` calls missing ``encoding=``.
 
@@ -704,6 +721,9 @@ def detect_c16(context: AuditContext) -> DetectorResult:
 
     Binary-mode equivalents (``read_bytes``, ``write_bytes``) are not
     flagged — they never need an encoding argument.
+
+    Skips ``write_text`` calls with 2+ positional args — those are custom
+    methods where the second positional is a filename, not encoding.
     """
     samples: list[str] = []
     count = 0
@@ -716,6 +736,10 @@ def detect_c16(context: AuditContext) -> DetectorResult:
         for m in _PATHLIB_TEXT_RE.finditer(text):
             call_body = _extract_call_body(text, m.start())
             if "encoding=" in call_body:
+                continue
+            # write_text(filename, content) — 2 positional args = custom method
+            method = m.group(0)
+            if "write_text" in method and _top_level_arg_count(call_body) >= 2:
                 continue
             lineno = text[: m.start()].count("\n") + 1
             count += 1
