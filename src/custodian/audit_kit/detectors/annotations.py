@@ -34,9 +34,9 @@ _SKIP_PARAMS = {"self", "cls"}
 def build_annotation_detectors() -> list[Detector]:
     return [
         Detector("E1", "public function missing return type annotation", "open",
-                 detect_e1, LOW, _NEEDS),
+                 detect_e1, LOW, _NEEDS, deprecated=True, replaces="ty:return-type / ruff:ANN201"),
         Detector("E2", "public function with unannotated parameter(s)", "open",
-                 detect_e2, LOW, _NEEDS),
+                 detect_e2, LOW, _NEEDS, deprecated=True, replaces="ty:annotation / ruff:ANN001"),
     ]
 
 

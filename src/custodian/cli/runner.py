@@ -32,6 +32,7 @@ def run_repo_audit(
     *,
     only: set[str] | None = None,
     min_severity: str | None = None,
+    skip_deprecated: bool = False,
 ) -> AuditResult:
     """Drive one repo through the audit pipeline.
 
@@ -81,7 +82,8 @@ def run_repo_audit(
                                     src_root=src_root, repo_root=repo_root,
                                     tests_root=tests_root),
     )
-    return run_audit(context=context, detectors=detectors, min_severity=min_severity)
+    return run_audit(context=context, detectors=detectors, min_severity=min_severity,
+                     skip_deprecated=skip_deprecated)
 
 
 def _build_analysis_graph(

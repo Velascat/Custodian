@@ -37,7 +37,7 @@ _NOQA_RE = re.compile(r"#\s*noqa\b", re.IGNORECASE)
 def build_import_detectors() -> list[Detector]:
     return [
         Detector("I1", "imported name never referenced in same file", "open",
-                 detect_i1, LOW, _NEEDS),
+                 detect_i1, LOW, _NEEDS, deprecated=True, replaces="ruff:F401"),
     ]
 
 

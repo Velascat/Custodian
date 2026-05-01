@@ -102,6 +102,8 @@ def main():
                         help="Print all available detector IDs and descriptions, then exit")
     parser.add_argument("--no-color", action="store_true",
                         help="Disable ANSI color output")
+    parser.add_argument("--skip-deprecated", action="store_true",
+                        help="Skip detectors marked deprecated (delegated to Ruff/Semgrep/ty)")
     args = parser.parse_args()
 
     if args.no_color:
@@ -115,7 +117,12 @@ def main():
     if args.only:
         only = {c.strip() for c in args.only.split(",") if c.strip()}
 
-    result = run_repo_audit(args.repo, only=only, min_severity=args.min_severity)
+    result = run_repo_audit(
+        args.repo,
+        only=only,
+        min_severity=args.min_severity,
+        skip_deprecated=getattr(args, "skip_deprecated", False),
+    )
 
     if args.json:
         print(result.to_json())

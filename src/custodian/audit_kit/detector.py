@@ -65,6 +65,11 @@ class Detector:
     detect: Callable[["AuditContext"], "DetectorResult"]
     severity: str = field(default=MEDIUM)
     needs: frozenset[str] = field(default_factory=frozenset)
+    # Phase 3+: detectors delegated to an external tool are marked deprecated.
+    # They still run by default for backward compat; pass skip_deprecated=True
+    # to the runner (or --skip-deprecated on the CLI) to omit them.
+    deprecated: bool = False
+    replaces: str = ""  # e.g. "ruff:T201" — which tool/rule replaces this
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,7 @@ def run_audit(
     detectors: list[Detector],
     *,
     min_severity: str | None = None,
+    skip_deprecated: bool = False,
 ) -> AuditResult:
     """Run all detectors consistently so repos can compare outputs across runs.
 
@@ -110,6 +116,8 @@ def run_audit(
     result = AuditResult(repo_key=context.config.get("repo_key", ""))
     total = 0
     for detector in detectors:
+        if skip_deprecated and detector.deprecated:
+            continue
         det_order = _SEVERITY_ORDER.get(detector.severity, _SEVERITY_ORDER[MEDIUM])
         if det_order > cutoff:
             continue

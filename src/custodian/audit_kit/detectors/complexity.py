@@ -39,9 +39,9 @@ _SKIP_PARAMS = {"self", "cls"}
 def build_complexity_detectors() -> list[Detector]:
     return [
         Detector("X1", "function cyclomatic complexity above threshold", "open",
-                 detect_x1, MEDIUM, _NEEDS),
+                 detect_x1, MEDIUM, _NEEDS, deprecated=True, replaces="ruff:C901"),
         Detector("X2", "function with too many parameters", "open",
-                 detect_x2, LOW, _NEEDS),
+                 detect_x2, LOW, _NEEDS, deprecated=True, replaces="ruff:PLR0913"),
     ]
 
 
