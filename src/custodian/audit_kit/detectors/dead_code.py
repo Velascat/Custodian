@@ -432,11 +432,16 @@ def detect_f1(context: AuditContext) -> DetectorResult:
     cg = context.graph.call_graph
     field_names = _dataclass_field_names(context.src_root)
 
+    audit_cfg: dict = context.config.get("audit") or {}
+    exempt: set[str] = set(audit_cfg.get("f1_exempt") or [])
+
     samples: list[str] = []
     count = 0
 
     for name in sorted(field_names):
         if name.startswith("_"):
+            continue
+        if name in exempt:
             continue
         if name in cg.accessed_attrs:
             continue
