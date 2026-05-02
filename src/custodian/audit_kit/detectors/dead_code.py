@@ -387,21 +387,54 @@ def detect_d7(context: AuditContext) -> DetectorResult:
 _SERIALIZATION_METHODS = frozenset({"to_dict", "to_json", "asdict", "model_dump", "dict", "__dict__"})
 
 
-def _dataclass_field_names(src_root: Path) -> set[str]:
+def _dataclass_field_names(src_root: Path, path_excludes: list[str] | None = None) -> set[str]:
     """Collect field names from @dataclass classes that lack serialization methods.
 
     Dataclasses with to_dict/to_json/model_dump/asdict methods expose all fields
     indirectly via serialization — we skip those to avoid false positives.
+
+    Also skips dataclasses that inherit from a class with serialization methods
+    (e.g. subclasses of a BaseContract that defines to_dict()).
     """
-    fields: set[str] = set()
+    import fnmatch as _fnmatch
+
+    # First pass: collect class names that have serialization methods defined
+    serializable_classes: set[str] = set()
+    all_trees: list[tuple[Path, ast.Module]] = []
+    repo_root_guess = src_root.parent  # approximate — used for relative path matching only
+
     for path in sorted(src_root.rglob("*.py")):
         if not path.is_file():
             continue
+        # Apply path excludes (relative to repo root approximation)
+        if path_excludes:
+            try:
+                rel_posix = path.relative_to(repo_root_guess).as_posix()
+            except ValueError:
+                rel_posix = path.as_posix()
+            if any(_fnmatch.fnmatch(rel_posix, excl) for excl in path_excludes):
+                continue
         try:
             text = path.read_text(encoding="utf-8")
             tree = ast.parse(text, filename=str(path))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
+        all_trees.append((path, tree))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            method_names = {
+                stmt.name
+                for stmt in node.body
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if method_names & _SERIALIZATION_METHODS:
+                serializable_classes.add(node.name)
+
+    # Second pass: collect fields, skipping dataclasses with serialization methods
+    # OR that inherit from a class with serialization methods
+    fields: set[str] = set()
+    for _path, tree in all_trees:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
@@ -411,13 +444,22 @@ def _dataclass_field_names(src_root: Path) -> set[str]:
                 for d in node.decorator_list
             ):
                 continue
-            # Skip dataclasses that expose fields via serialization methods
+            # Skip dataclasses that expose fields via serialization methods (direct or inherited)
             method_names = {
                 stmt.name
                 for stmt in node.body
                 if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
             if method_names & _SERIALIZATION_METHODS:
+                continue
+            # Skip subclasses of serializable classes
+            base_names = set()
+            for b in node.bases:
+                if isinstance(b, ast.Name):
+                    base_names.add(b.id)
+                elif isinstance(b, ast.Attribute):
+                    base_names.add(b.attr)
+            if base_names & serializable_classes:
                 continue
             for stmt in node.body:
                 if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
@@ -435,10 +477,10 @@ def detect_f1(context: AuditContext) -> DetectorResult:
         return DetectorResult(count=0, samples=[])
 
     cg = context.graph.call_graph
-    field_names = _dataclass_field_names(context.src_root)
-
     audit_cfg: dict = context.config.get("audit") or {}
     exempt: set[str] = set(audit_cfg.get("f1_exempt") or [])
+    f1_path_excludes: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("F1") or [])
+    field_names = _dataclass_field_names(context.src_root, path_excludes=f1_path_excludes or None)
 
     samples: list[str] = []
     count = 0

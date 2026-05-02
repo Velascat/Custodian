@@ -6,13 +6,17 @@ These detectors require the ``import_graph`` analysis pass.  They answer
 questions about relationships *between* modules rather than patterns within
 a single file.
 
+Note: the A2 (directory structure) detector lives in ``directory.py`` and is
+registered by ``build_directory_detectors()``.
+
 Detectors
 ─────────
 A1  Architecture invariants — declarative YAML rules enforcing structural
     constraints per file/glob.  Rules are expressed in ``.custodian.yaml``
     under ``architecture.invariants``.  Each rule may enforce one of:
-    max_lines, max_classes, max_functions, or forbidden_import.  If no
-    invariants are declared the detector silently reports 0 findings.
+    max_lines, max_classes, max_functions, forbidden_import,
+    forbidden_import_prefix, or class_field_count.  If no invariants are
+    declared the detector silently reports 0 findings.
 
 S1  Layer boundary violations — files in a declared layer import from a
     layer they are forbidden to depend on.  Rules are expressed in
@@ -35,6 +39,12 @@ S4  Missing venv guard in tests/conftest.py — the top-level conftest must
     or a developer can run the suite with a foreign venv and get misleading
     green results from the wrong package versions.
 
+H1  Hexagonal architecture layer ordering — layers declared under
+    ``architecture.hex`` must only import from layers earlier (lower index)
+    in the list.  The ordering is the canonical dependency direction:
+    domain → application → adapters/ports → infrastructure.  More opinionated
+    and concise than S1's explicit ``may_not_import`` lists.
+
 Config example for S1::
 
     architecture:
@@ -49,13 +59,38 @@ Config example for S1::
             - "src/myapp/adapters/**"
             - "src/myapp/entrypoints/**"
 
+Config example for H1 (hexagonal architecture)::
+
+    architecture:
+      hex:
+        # Listed from innermost to outermost. Each layer may only import
+        # from layers earlier in this list (lower index).
+        - name: domain
+          glob: "src/myapp/domain/**"
+        - name: application
+          glob: "src/myapp/application/**"
+        - name: adapters
+          glob: "src/myapp/adapters/**"
+        - name: infrastructure
+          glob: "src/myapp/infrastructure/**"
+
+Config example for A1 class_field_count::
+
+    architecture:
+      invariants:
+        - name: "WorkflowContext size guard"
+          glob: "src/**/*.py"
+          class_field_count:
+            class_name: "WorkflowContext"
+            max_fields: 20
+
 Globs are matched against file paths relative to repo_root.
 """
 from __future__ import annotations
 
 import ast
 import fnmatch
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from custodian.audit_kit.detector import (
@@ -63,7 +98,7 @@ from custodian.audit_kit.detector import (
 )
 
 if TYPE_CHECKING:
-    from custodian.audit_kit.passes.import_graph import ImportGraph
+    pass
 
 _MAX_SAMPLES = 8
 _NEEDS = frozenset({"import_graph"})
@@ -82,6 +117,8 @@ def build_structure_detectors() -> list[Detector]:
                  MEDIUM, _NEEDS_AST),
         Detector("S4", "tests/conftest.py missing venv guard", "open", detect_s4,
                  MEDIUM, frozenset()),
+        Detector("H1", "hexagonal architecture layer ordering violation", "open", detect_h1,
+                 MEDIUM, _NEEDS),
     ]
 
 
@@ -236,7 +273,48 @@ def detect_a1(context: AuditContext) -> DetectorResult:
                             )
                         break  # one violation per rule per file is enough
 
+            # class_field_count — named class must not exceed max declared fields.
+            # Counts ast.AnnAssign entries in the class body (dataclass / NamedTuple
+            # style). Useful for god-object detection (e.g. WorkflowContext).
+            if "class_field_count" in rule:
+                cfg = rule["class_field_count"]
+                class_name: str = cfg.get("class_name", "")
+                max_fields: int = int(cfg.get("max_fields", 20))
+                if class_name:
+                    for node in ast.walk(tree):
+                        if not isinstance(node, ast.ClassDef):
+                            continue
+                        if node.name != class_name:
+                            continue
+                        field_count = sum(
+                            1 for item in node.body
+                            if isinstance(item, ast.AnnAssign)
+                            and isinstance(item.target, ast.Name)
+                            and not _is_init_var(item.annotation)
+                        )
+                        if field_count > max_fields:
+                            count += 1
+                            if len(samples) < _MAX_SAMPLES:
+                                samples.append(
+                                    f"{rel}: {class_name} has {field_count} declared fields "
+                                    f"(threshold {max_fields}) — forbidden by {name!r}"
+                                )
+                        break  # report once per class per file
+
     return DetectorResult(count=count, samples=samples)
+
+
+def _is_init_var(annotation: ast.expr | None) -> bool:
+    """True if the annotation is InitVar[...] (dataclass init-only field, not stored)."""
+    if annotation is None:
+        return False
+    if isinstance(annotation, ast.Subscript):
+        v = annotation.value
+        if isinstance(v, ast.Name) and v.id == "InitVar":
+            return True
+        if isinstance(v, ast.Attribute) and v.attr == "InitVar":
+            return True
+    return isinstance(annotation, ast.Name) and annotation.id == "InitVar"
 
 
 # ── S1: layer boundary violations ────────────────────────────────────────────
@@ -432,3 +510,68 @@ def detect_s4(context: AuditContext) -> DetectorResult:
         count=1,
         samples=[f"{rel}: no venv guard — add sys.prefix / _EXPECTED_VENV check"],
     )
+
+
+# ── H1: hexagonal architecture layer ordering ─────────────────────────────────
+
+def _parse_hex_layers(config: dict) -> list[dict]:
+    arch = config.get("architecture") or {}
+    return list(arch.get("hex") or [])
+
+
+def detect_h1(context: AuditContext) -> DetectorResult:
+    """Flag imports that violate hexagonal architecture layer ordering.
+
+    Layers are declared in ``.custodian.yaml`` under ``architecture.hex`` as an
+    ordered list from innermost (domain) to outermost (infrastructure).  Each
+    layer may only import from layers with a *lower index* (earlier in the list).
+    A domain module importing from application or infrastructure is a violation.
+
+    This is more opinionated and concise than S1's explicit ``may_not_import``
+    lists: the dependency direction is encoded by list position, not enumeration.
+    """
+    if context.graph is None or context.graph.import_graph is None:
+        return DetectorResult(count=0, samples=[])
+
+    hex_layers = _parse_hex_layers(context.config)
+    if not hex_layers:
+        return DetectorResult(count=0, samples=[])
+
+    graph = context.graph.import_graph
+    samples: list[str] = []
+    count = 0
+
+    # Build index: path → layer index
+    def _layer_index(rel_path: Path) -> int | None:
+        for idx, layer in enumerate(hex_layers):
+            globs = layer.get("glob") or layer.get("globs") or []
+            if isinstance(globs, str):
+                globs = [globs]
+            if _any_glob(rel_path, globs):
+                return idx
+        return None
+
+    for rel_path, imported_modules in graph.imports.items():
+        src_idx = _layer_index(rel_path)
+        if src_idx is None:
+            continue
+
+        for mod_name in sorted(imported_modules):
+            imported_path = graph.module_to_path.get(mod_name)
+            if imported_path is None:
+                continue
+            imp_idx = _layer_index(imported_path)
+            if imp_idx is None:
+                continue
+            # Violation: importing from a layer with HIGHER index (outer importing inner is OK;
+            # inner importing outer is not)
+            if imp_idx > src_idx:
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    src_name = hex_layers[src_idx].get("name", str(src_idx))
+                    imp_name = hex_layers[imp_idx].get("name", str(imp_idx))
+                    samples.append(
+                        f"[{src_name}→{imp_name}] {rel_path} imports {imported_path}"
+                    )
+
+    return DetectorResult(count=count, samples=samples)

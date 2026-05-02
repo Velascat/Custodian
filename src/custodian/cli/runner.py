@@ -14,6 +14,7 @@ from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.imports import build_import_detectors
+from custodian.audit_kit.detectors.directory import build_directory_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
 from custodian.audit_kit.detectors.test_shape import build_test_shape_detectors
@@ -70,6 +71,7 @@ def run_repo_audit(
     tests_root = repo_root / config.get("tests_root", "tests")
     detectors  = (build_code_health_detectors()
                   + build_structure_detectors()
+                  + build_directory_detectors()
                   + build_stub_detectors()
                   + build_dead_code_detectors()
                   + build_test_shape_detectors()

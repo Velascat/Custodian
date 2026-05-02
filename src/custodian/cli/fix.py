@@ -7,7 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from custodian.cli.runner import load_config, run_repo_audit
+from custodian.cli.runner import run_repo_audit
 from custodian.codemods.base import run_codemods
 
 

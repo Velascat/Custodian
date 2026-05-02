@@ -60,9 +60,11 @@ audit:
     C29:
       # These files are large by design — they're the core detector registries.
       # code_health.py houses all C-class detectors; dead_code.py houses all
-      # D/F-class detectors. Splitting them would fracture the registry pattern.
+      # D/F-class detectors. structure.py houses A1/S1-S4/H1 — all architecture
+      # detectors in one coherent module. Splitting them would fracture the registry.
       - src/custodian/audit_kit/code_health.py
       - src/custodian/audit_kit/detectors/dead_code.py
+      - src/custodian/audit_kit/detectors/structure.py
     T1:
       # Detector functions (detect_cN, build_*_detectors) are tested
       # transitively through the CLI and integration test suite; they're
@@ -70,6 +72,7 @@ audit:
       - src/custodian/audit_kit/code_health.py
       - src/custodian/audit_kit/detector.py
       - src/custodian/audit_kit/detectors/dead_code.py
+      - src/custodian/audit_kit/detectors/directory.py
       - src/custodian/audit_kit/detectors/ghost.py
       - src/custodian/audit_kit/detectors/structure.py
       - src/custodian/audit_kit/detectors/stubs.py

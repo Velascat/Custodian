@@ -26,7 +26,6 @@ G1  TODO/FIXME comments that reference a CamelCase name no longer present
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from custodian.audit_kit.detector import (
     AuditContext, Detector, DetectorResult, LOW,

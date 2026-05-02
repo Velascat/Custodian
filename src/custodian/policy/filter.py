@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import PurePosixPath
 
 from custodian.core.finding import Finding, _SEVERITY_ORDER
 

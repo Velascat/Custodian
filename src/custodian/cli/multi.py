@@ -153,7 +153,7 @@ def _print_table(results: list) -> None:
             continue
         name = (result.repo_key or str(repo))[:col_repo]
         counts = _severity_counts(result.patterns)
-        h, m, l = counts["high"], counts["medium"], counts["low"]
+        h, m, lo = counts["high"], counts["medium"], counts["low"]
         if result.total_findings == 0:
             status = colors.green("clean")
             findings_col = colors.green(f"{result.total_findings:>8}")
@@ -163,7 +163,7 @@ def _print_table(results: list) -> None:
         h_col = colors.red(f"{h:>4}") if h > 0 else f"{h:>4}"
         m_col = colors.yellow(f"{m:>4}") if m > 0 else f"{m:>4}"
         print(
-            f"{name:<{col_repo}} | {findings_col} | {h_col} | {m_col} | {l:>4} | {status}"
+            f"{name:<{col_repo}} | {findings_col} | {h_col} | {m_col} | {lo:>4} | {status}"
         )
 
     # Summary footer

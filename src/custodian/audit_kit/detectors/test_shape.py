@@ -178,11 +178,18 @@ def detect_t1(context: AuditContext) -> DetectorResult:
 
 def detect_t2(context: AuditContext) -> DetectorResult:
     """Flag test_ functions whose body contains no assert statement."""
+    import fnmatch as _fnmatch
+    audit_cfg: dict = context.config.get("audit") or {}
+    t2_excludes: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("T2") or [])
+
     samples: list[str] = []
     count = 0
 
     for path, tree in _parse_test_files(context.tests_root):
         rel = path.relative_to(context.repo_root)
+        rel_posix = rel.as_posix()
+        if t2_excludes and any(_fnmatch.fnmatch(rel_posix, excl) for excl in t2_excludes):
+            continue
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
