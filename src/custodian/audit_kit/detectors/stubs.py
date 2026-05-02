@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velascat
-"""U-class detectors — unimplemented / stub functions.
+"""U-class and P-class detectors — unimplemented / stub / hollow functions.
 
 These detectors use the ``ast_forest`` analysis pass to inspect function
 bodies across all source files.
@@ -21,6 +21,13 @@ U3  Docstring-only functions — functions that contain only a docstring and
     no other statements.  These are almost always unfinished implementations
     left after scaffolding.  Excludes ``@abstractmethod`` and ``Protocol``
     methods.
+
+P1  Hollow return bodies — functions whose entire body (after an optional
+    docstring) is only a single ``return`` of an empty collection or None
+    (``return []``, ``return {}``, ``return None``, ``return ""``,
+    ``return list()``, ``return dict()``).  Unlike U1-U3 stubs, these
+    look "implemented" but produce no useful output.  Excludes
+    ``@abstractmethod``, ``@overload``, and Protocol methods.
 """
 from __future__ import annotations
 
@@ -47,6 +54,8 @@ def build_stub_detectors() -> list[Detector]:
                  detect_u2, LOW, _NEEDS),
         Detector("U3", "docstring-only function body (no implementation)", "open",
                  detect_u3, LOW, _NEEDS),
+        Detector("P1", "hollow return body (returns only empty collection/None)", "open",
+                 detect_p1, LOW, _NEEDS),
     ]
 
 
@@ -232,3 +241,41 @@ def detect_u3(context: AuditContext) -> DetectorResult:
         # And nothing else after the docstring
         return len(func.body) == 1
     return _scan_functions(context, predicate, detector_id="U3")
+
+
+# ── P1 ────────────────────────────────────────────────────────────────────────
+
+def _is_empty_return(stmt: ast.stmt) -> bool:
+    """True if stmt is ``return`` / ``return None`` / ``return []`` / etc."""
+    if not isinstance(stmt, ast.Return):
+        return False
+    val = stmt.value
+    if val is None:
+        return True
+    # return None (constant)
+    if isinstance(val, ast.Constant) and (val.value is None or val.value == "" or val.value == 0):
+        return True
+    # return [] / return {}
+    if isinstance(val, ast.List) and not val.elts:
+        return True
+    if isinstance(val, ast.Dict) and not val.keys:
+        return True
+    if isinstance(val, ast.Set) and not val.elts:
+        return True
+    if isinstance(val, ast.Tuple) and not val.elts:
+        return True
+    # return list() / return dict() / return set() / return tuple()
+    if (isinstance(val, ast.Call)
+            and isinstance(val.func, ast.Name)
+            and val.func.id in {"list", "dict", "set", "tuple"}
+            and not val.args and not val.keywords):
+        return True
+    return False
+
+
+def detect_p1(context: AuditContext) -> DetectorResult:
+    """Flag functions whose body (after docstring) is only a hollow return."""
+    def predicate(func):
+        body = _strip_docstring(func.body)
+        return len(body) == 1 and _is_empty_return(body[0])
+    return _scan_functions(context, predicate, detector_id="P1")

@@ -7,6 +7,24 @@ tests_root: tests
 # repos, it should be flagged here too.
 
 audit:
+  # Terms used as documentation vocabulary (category labels, config key names)
+  # that are not Python class/function names — suppress K1/K2 false positives.
+  common_words:
+    - custodian_hygiene
+    - custodian_policy
+    - forbidden_import_prefix
+    - forbidden_import
+    - max_lines
+    - max_classes
+    - max_functions
+    - class_field_count
+    - vulture_advisory
+    - write_text
+
+  known_values:
+    - custodian_hygiene
+    - custodian_policy
+
   # C1/C6: code_health.py contains "TODO" and "FIXME" as regex string literals
   # inside the detector patterns — not actual debt markers.
   # C2: audit.py is a CLI entrypoint that legitimately writes to stdout.
@@ -65,6 +83,17 @@ audit:
       - src/custodian/audit_kit/code_health.py
       - src/custodian/audit_kit/detectors/dead_code.py
       - src/custodian/audit_kit/detectors/structure.py
+    C13:
+      # CLI tools set os.environ["NO_COLOR"] to disable terminal colour in
+      # subprocess output — this is terminal-formatting control, not config
+      # access. Custodian itself has no centralised config layer.
+      - "src/custodian/**/*.py"
+    P1:
+      # These builder functions intentionally return [] — the module docstring
+      # explains the class was removed/superseded by ruff/ty adapter rules.
+      - src/custodian/audit_kit/detectors/imports.py
+      - src/custodian/audit_kit/detectors/annotations.py
+      - src/custodian/audit_kit/detectors/complexity.py
     T1:
       # Detector functions (detect_cN, build_*_detectors) are tested
       # transitively through the CLI and integration test suite; they're
@@ -77,6 +106,7 @@ audit:
       - src/custodian/audit_kit/detectors/structure.py
       - src/custodian/audit_kit/detectors/stubs.py
       - src/custodian/audit_kit/detectors/test_shape.py
+      - src/custodian/audit_kit/detectors/docs.py
       # CLI runner and report modules are tested through end-to-end CLI tests.
       - src/custodian/cli/runner.py
       - src/custodian/cli/report.py

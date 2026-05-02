@@ -10,6 +10,7 @@ from custodian.audit_kit.code_health import build_code_health_detectors
 from custodian.audit_kit.detectors.annotations import build_annotation_detectors
 from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
+from custodian.audit_kit.detectors.docs import build_docs_detectors
 from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.imports import build_import_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
@@ -26,6 +27,9 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset({
 _KNOWN_AUDIT_KEYS = frozenset({
     "exclude_paths", "stale_handlers", "common_words",
     "x1_threshold", "x2_threshold", "c29_threshold", "c33_threshold",
+    "c13_allowed_paths",
+    "t3_env_gate_hints",
+    "k1_extra_doc_dirs", "known_values",
     # plugin-extension keys (plugins may declare arbitrary audit sub-keys)
     "plugin_audit_keys",
 })
@@ -157,6 +161,7 @@ def main():
                                 + build_complexity_detectors()
                                 + build_ghost_detectors()
                                 + build_import_detectors()
+                                + build_docs_detectors()
                                 + extra)}
     exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
     if isinstance(exclude_paths, dict):

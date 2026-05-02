@@ -12,6 +12,7 @@ from custodian.audit_kit.detector import AnalysisGraph, AuditContext, run_audit
 from custodian.audit_kit.detectors.annotations import build_annotation_detectors
 from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
+from custodian.audit_kit.detectors.docs import build_docs_detectors
 from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.imports import build_import_detectors
 from custodian.audit_kit.detectors.directory import build_directory_detectors
@@ -79,6 +80,7 @@ def run_repo_audit(
                   + build_complexity_detectors()
                   + build_ghost_detectors()
                   + build_import_detectors()
+                  + build_docs_detectors()
                   + extra)
 
     if only:

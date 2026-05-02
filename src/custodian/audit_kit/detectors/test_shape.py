@@ -8,6 +8,12 @@ T1  Public src functions and classes with zero name references in tests.
     Uses the tests_forest pass to collect all ast.Name occurrences in
     test files, then flags public src symbols whose name never appears.
     Conservative: only checks module-level definitions, excludes private
+
+T3  Unconditional pytest.skip() call or @pytest.mark.skip decorator with
+    no environment-gate context in the surrounding lines. A skip that is
+    not conditioned on a missing tool, platform, or env var silently
+    drops test coverage permanently. Configure extra gate hints via
+    ``audit.t3_env_gate_hints`` in ``.custodian.yaml``.
     names and dunder names.  LOW severity — indirect testing via wrappers
     and integration tests will produce false positives.
 
@@ -37,6 +43,8 @@ def build_test_shape_detectors() -> list[Detector]:
                  detect_t1, LOW, _NEEDS_TF),
         Detector("T2", "test function with no assert statement", "open",
                  detect_t2, LOW),
+        Detector("T3", "unconditional pytest.skip without environment gate", "open",
+                 detect_t3, LOW),
     ]
 
 
@@ -199,4 +207,48 @@ def detect_t2(context: AuditContext) -> DetectorResult:
                 if len(samples) < _MAX_SAMPLES:
                     samples.append(f"{rel}:{node.lineno}: {node.name}() — no assert")
 
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── T3 ────────────────────────────────────────────────────────────────────────
+
+_DEFAULT_ENV_GATE_HINTS = (
+    "os.environ", "os.getenv", "pytest.importorskip", "shutil.which",
+    "sys.platform", "sys.version", "importlib", "skipif", "reason=",
+    "not in fixture", "no records", "not present", "fixture",
+)
+
+
+def detect_t3(context: AuditContext) -> DetectorResult:
+    """Flag pytest.skip() / @pytest.mark.skip without an environment-gate hint nearby.
+
+    Scans a 7-line window (6 lines before the skip + the skip line itself) for
+    any env-gate hint. Configurable extra hints via ``audit.t3_env_gate_hints``
+    in ``.custodian.yaml``. Unconditional skips silently drop coverage; they
+    should be guarded by an env/tool check or replaced with pytest.mark.xfail.
+    """
+    audit_cfg = context.config.get("audit") or {}
+    extra_hints: list[str] = list(audit_cfg.get("t3_env_gate_hints") or [])
+    hints = _DEFAULT_ENV_GATE_HINTS + tuple(extra_hints)
+
+    samples: list[str] = []
+    count = 0
+    for path, _tree in _parse_test_files(context.tests_root):
+        rel = path.relative_to(context.repo_root)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines, 1):
+            stripped = line.lstrip()
+            is_call = "pytest.skip(" in line
+            is_decorator = stripped.startswith("@pytest.mark.skip")
+            if not is_call and not is_decorator:
+                continue
+            window = "\n".join(lines[max(0, i - 7): i])
+            if any(h.lower() in window.lower() for h in hints):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{i}: {line.strip()[:80]}")
     return DetectorResult(count=count, samples=samples)

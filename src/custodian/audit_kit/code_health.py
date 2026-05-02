@@ -135,6 +135,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C6",  "FIXME markers",                                                   "open",    detect_c6,   LOW),
         D("C8",  "stale handler references",                                        "partial", detect_c8,   MEDIUM),
         D("C11", "subprocess call without timeout",                                 "open",    detect_c11,  MEDIUM),
+        D("C13", "raw os.environ/os.getenv access outside config layer",            "open",    detect_c13,  MEDIUM),
         D("C28", "hardcoded IP address in string literal",                          "open",    detect_c28,  LOW),
         D("C29", "file exceeds line-count threshold",                               "open",    detect_c29,  LOW),
         D("C32", "hardcoded credential in assignment",                              "open",    detect_c32,  HIGH),
@@ -142,8 +143,28 @@ def build_code_health_detectors() -> list[Detector]:
     ]
 
 
+_DEFERRED_REVIEWED_RE = re.compile(r"\[deferred,\s*reviewed\b", re.IGNORECASE)
+_TODO_RE = re.compile(r"\bTODO\b")
+
+
 def detect_c1(context: AuditContext) -> DetectorResult:
-    return _count_pattern(_py_files(context, "C1"), re.compile(r"TODO"))
+    """Flag TODO comments, skipping lines tagged [deferred, reviewed]."""
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C1"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(raw.splitlines(), 1):
+            if not _TODO_RE.search(line):
+                continue
+            if _DEFERRED_REVIEWED_RE.search(line):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{path}:{lineno}: {line.strip()[:60]}")
+    return DetectorResult(count=count, samples=samples)
 
 
 
@@ -449,4 +470,52 @@ def detect_c33(context: AuditContext) -> DetectorResult:
                 samples.append(
                     f"{rel} — {len(markers)} ghost markers (TODO/FIXME/HACK/XXX)"
                 )
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C13: raw os.environ / os.getenv outside config layer ─────────────────────
+
+_ENV_ACCESS_RE = re.compile(r"\bos\.(environ|getenv)\b")
+
+
+def detect_c13(context: AuditContext) -> DetectorResult:
+    """Flag raw os.environ/os.getenv access outside the designated config layer.
+
+    Bypassing a centralised config layer makes secret rotation and test
+    isolation harder. Mark allowed paths via ``audit.c13_allowed_paths``
+    in ``.custodian.yaml`` (glob patterns relative to repo root). Tests
+    and the config layer itself are allowed by default.
+
+    Config example::
+
+        audit:
+          c13_allowed_paths:
+            - "src/config/**"
+            - "tests/**"
+            - "src/myapp/start.py"
+    """
+    audit_cfg = context.config.get("audit") or {}
+    extra_globs: list[str] = list(audit_cfg.get("c13_allowed_paths") or [])
+    tests_rel = (
+        str(context.tests_root.relative_to(context.repo_root))
+        if context.tests_root.is_dir()
+        else "tests"
+    )
+    allowed_globs = [f"{tests_rel}/**", f"{tests_rel}/*.py"] + extra_globs
+
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C13"):
+        rel = str(path.relative_to(context.repo_root))
+        if _matches_any(rel, allowed_globs):
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(raw.splitlines(), 1):
+            if _ENV_ACCESS_RE.search(line):
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(f"{path}:{lineno}: {line.strip()[:60]}")
     return DetectorResult(count=count, samples=samples)
