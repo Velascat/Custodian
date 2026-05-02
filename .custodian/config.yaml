@@ -110,6 +110,7 @@ audit:
       - src/custodian/audit_kit/detectors/stubs.py
       - src/custodian/audit_kit/detectors/test_shape.py
       - src/custodian/audit_kit/detectors/docs.py
+      - src/custodian/audit_kit/detectors/naming.py
       # CLI runner and report modules are tested through end-to-end CLI tests.
       - src/custodian/cli/runner.py
       - src/custodian/cli/report.py
