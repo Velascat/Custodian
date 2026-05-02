@@ -27,7 +27,9 @@ P1  Hollow return bodies — functions whose entire body (after an optional
     (``return []``, ``return {}``, ``return None``, ``return ""``,
     ``return list()``, ``return dict()``).  Unlike U1-U3 stubs, these
     look "implemented" but produce no useful output.  Excludes
-    ``@abstractmethod``, ``@overload``, and Protocol methods.
+    ``@abstractmethod``, ``@overload``, Protocol methods, explicitly-void
+    functions (``-> None`` annotation), and sink-pattern methods (``**_``
+    kwargs absorber — the null-object idiom).
 """
 from __future__ import annotations
 
@@ -200,7 +202,7 @@ def _scan_functions(
             container = _containing_class(node, tree)
             if container and container.name in protocol_names:
                 continue
-            if predicate(node):
+            if predicate(node, container):
                 count += 1
                 if len(samples) < _MAX_SAMPLES:
                     samples.append(_sample(path, node, context))
@@ -212,7 +214,7 @@ def _scan_functions(
 
 def detect_u1(context: AuditContext) -> DetectorResult:
     """Flag functions whose body (after docstring) is only raise NotImplementedError."""
-    def predicate(func):
+    def predicate(func, _container):
         body = _strip_docstring(func.body)
         return len(body) == 1 and _is_not_implemented_raise(body[0])
     return _scan_functions(context, predicate, detector_id="U1")
@@ -222,7 +224,7 @@ def detect_u1(context: AuditContext) -> DetectorResult:
 
 def detect_u2(context: AuditContext) -> DetectorResult:
     """Flag functions whose body (after docstring) is only ``...``."""
-    def predicate(func):
+    def predicate(func, _container):
         body = _strip_docstring(func.body)
         return len(body) == 1 and _is_ellipsis_only(body[0])
     return _scan_functions(context, predicate, detector_id="U2")
@@ -232,7 +234,7 @@ def detect_u2(context: AuditContext) -> DetectorResult:
 
 def detect_u3(context: AuditContext) -> DetectorResult:
     """Flag functions that contain only a docstring (no implementation at all)."""
-    def predicate(func):
+    def predicate(func, _container):
         # Has a docstring
         if not (func.body and isinstance(func.body[0], ast.Expr)
                 and isinstance(func.body[0].value, ast.Constant)
@@ -273,9 +275,52 @@ def _is_empty_return(stmt: ast.stmt) -> bool:
     return False
 
 
+def _returns_none_explicitly(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True if the function is annotated ``-> None`` (explicitly void)."""
+    ret = func.returns
+    if ret is None:
+        return False
+    if isinstance(ret, ast.Constant) and ret.value is None:
+        return True
+    if isinstance(ret, ast.Name) and ret.id == "None":
+        return True
+    return False
+
+
+_NULL_CLASS_PREFIXES = ("Null", "_Null", "Mock", "Fake", "Stub", "Dummy")
+
+
+def _in_null_named_class(container: ast.ClassDef | None) -> bool:
+    """True if the containing class name signals a null-object or test-double pattern."""
+    if container is None:
+        return False
+    return container.name.startswith(_NULL_CLASS_PREFIXES)
+
+
+def _has_sink_args(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True if positional or keyword varargs use ``_``-prefixed names (discard pattern).
+
+    Matches ``*_args`` / ``**_kwargs`` / ``**_`` — all signal that the
+    arguments are intentionally absorbed and ignored (null-object / sink idiom).
+    """
+    if func.args.vararg and func.args.vararg.arg.startswith("_"):
+        return True
+    if func.args.kwarg and func.args.kwarg.arg.startswith("_"):
+        return True
+    return False
+
+
 def detect_p1(context: AuditContext) -> DetectorResult:
     """Flag functions whose body (after docstring) is only a hollow return."""
-    def predicate(func):
+    def predicate(func, container):
         body = _strip_docstring(func.body)
-        return len(body) == 1 and _is_empty_return(body[0])
+        if len(body) != 1 or not _is_empty_return(body[0]):
+            return False
+        if _returns_none_explicitly(func):
+            return False
+        if _has_sink_args(func):
+            return False
+        if _in_null_named_class(container):
+            return False
+        return True
     return _scan_functions(context, predicate, detector_id="P1")
