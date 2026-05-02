@@ -2,32 +2,32 @@
 
 ## Objective
 
-Expand Custodian's detector coverage into dead code, dead fields, flow audit, and architecture invariant categories — the analysis classes it currently lacks entirely.
+Continue expanding Custodian's detector coverage and run improvement rounds across all repos until findings reach zero or are explicitly deferred.
 
 ## Context
 
-Current detector inventory (2026-04-30):
+Current state (2026-05-02):
 
-**C-class — 18 file-local code health detectors (C1–C18)**
-Style, safety, encoding, logging, datetime, subprocess patterns.
+**70 detectors live** (57 core + 13 OC plugin):
+- C-class (C1–C33): file-local code health, security, complexity, ghost-work density
+- S-class (S1–S4): import layer violations, circular imports, test import in src, conftest venv guard
+- U-class (U1–U3): raise NIE / ellipsis / docstring-only stubs
+- D-class (D1–D7): dead functions, branches, classes, unreachable code, fields, partially-wired pipelines, dead method params
+- F-class (F1–F3): dead dataclass fields, module constants, Pydantic BaseModel fields
+- A-class (A1–A2): declarative invariants (max_lines/max_classes/forbidden_import, directory structure)
+- E/T/X/G/I: annotation gaps, test shape, complexity, ghost CamelCase, unused imports
+- H1: hexagonal architecture layer ordering
 
-**S-class — 2 cross-file structure detectors (S1–S2)**
-S1 layer boundary violations (declarative YAML config), S2 mutual imports.
+All 15 refactor phases complete. Custodian self-audit: 0 findings.
 
-**U-class — 3 cross-file stub detectors (U1–U3)**
-U1 raise NotImplementedError, U2 ellipsis-only, U3 docstring-only bodies.
-
-**Gaps — what Custodian does NOT detect:**
-- D-class (dead code): unused functions/classes/constants, unreachable branches,
-  functions that never return normally (always raise), dead `else` after `return`
-- F-class (field/variable): dataclass fields never read outside __init__,
-  module-level constants only assigned never read
-- G-class (ghost work): TODO/FIXME that reference symbols no longer in the codebase
-- T-class (test coverage): public API functions with no test file referencing them
-- A-class (architecture invariants): naming pattern enforcement, forbidden direct
-  dependencies (e.g. domain must not call requests directly), interface compliance
+Remaining findings across managed repos (as of round 9):
+- VF: A1=1 (WorkflowContext 47 fields, real architectural debt), T1=670 (integration-tested pipeline, intentional), VULTURE=~342, C15=163 (tracked tech debt)
+- OC: T1=266 (excluded adapters/entrypoints, monkeypatch-tested)
+- SB: clean
+- CxRP: clean
+- OConsole: clean
 
 ## Definition of Done
 
-Each new detector class: implemented with tests, running clean on all 5 repos,
-committed and pushed.
+Each new detector: implemented with tests, running clean on all 5 repos, committed and pushed.
+Each improvement round: all fixable findings resolved, non-fixable deferred with rationale.

@@ -1,5 +1,8 @@
 # Log
 
+_Chronological continuity log. Decisions, stop points, what changed and why._
+_Not a task tracker — that's backlog.md. Keep entries concise and dated._
+
 ## Recent Decisions
 
 | Decision | Rationale | Date |
@@ -20,12 +23,10 @@
 | All 15 Custodian refactor phases complete | Phases 4-15 implemented in one session: Semgrep/ty/mypy/Vulture adapters, policy layer, codemod base, config migration, JSON/SARIF/Markdown reports, integration tests, deprecated detector cleanup, unified CLI, pre-commit hooks, multi-repo enhancements. 475 tests. | 2026-05-01 |
 | S4 detector: missing venv guard in tests/conftest.py | Repeatedly having to add venv guard manually; made it a detector so Custodian flags repos that are missing it | 2026-05-01 |
 | Deprecated detectors stubbed not deleted | 27 detect_* functions replaced with stubs returning (0,[]); Detector registrations kept for --list-detectors to show them with deprecated=True status | 2026-05-01 |
-|----------|-----------|------|
 | F3 skips classes deserialized via model_validate*() | ClassName.model_validate*() calls mean all fields are part of the external schema; not dead even if not accessed as Python attributes | 2026-05-01 |
 | F3 transitively expands model_validate_classes | Pydantic inflates nested models automatically during deserialization; a field typed as NestedModel in a deserialized class means NestedModel's fields are also schema fields | 2026-05-01 |
 | align_text_to_scene restored + added to __all__ (VF) | Function was deleted as D1 false positive; actually monkey-patched via module attribute access in tools/audit/adapters/runtime_hooks — D1 checks called_names not called_attrs | 2026-05-01 |
 | D1 false positive: module attribute monkey-patching | `align_mod.align_text_to_scene = ...` is attribute access not a call; D1 misses these. Fix: add __all__ to suppress, or improve D1 to also check called_attrs (but that would suppress too many) | 2026-05-01 |
-|----------|-----------|------|
 | D7 recognizes del var as param use | del stage_name, content_type is the Python idiom for intentionally discarding Protocol-required params; Del ctx added to used_names check | 2026-05-01 |
 | D7 skips @override methods | Override implementations must match the parent signature; unused params are interface-required | 2026-05-01 |
 | D7 treats raise NotImplementedError as stub body | Single-statement or docstring+raise NIE body = incomplete stub; params not flagged | 2026-05-01 |
