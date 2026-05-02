@@ -141,11 +141,11 @@ def main():
     sys.path.insert(0, str(args.repo))
     try:
         try:
-            load_plugins(config)
+            load_plugins(config, args.repo)
         except Exception as exc:
             warnings.append(f"plugins error: {exc}")
         try:
-            extra = load_detectors(config)
+            extra = load_detectors(config, args.repo)
         except Exception as exc:
             warnings.append(f"detectors error: {exc}")
             extra = []

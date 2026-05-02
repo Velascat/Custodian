@@ -25,6 +25,12 @@ from custodian.plugins.loader import load_detectors, load_plugins
 
 
 def load_config(repo_root: Path) -> dict:
+    # New layout: .custodian/config.yaml — preferred.
+    new_path = repo_root / ".custodian" / "config.yaml"
+    if new_path.exists():
+        with new_path.open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    # Backward-compat: fall back to the old root-level file.
     config_path = repo_root / ".custodian.yaml"
     with config_path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
@@ -58,8 +64,8 @@ def run_repo_audit(
     _cached = [k for k in sys.modules if k == "_custodian" or k.startswith("_custodian.")]
     _saved = {k: sys.modules.pop(k) for k in _cached}
     try:
-        plugins   = load_plugins(config)
-        extra     = load_detectors(config)
+        plugins   = load_plugins(config, repo_root)
+        extra     = load_detectors(config, repo_root)
     finally:
         sys.path.remove(str(repo_root))
         # Remove this repo's _custodian modules and restore any previously cached ones
