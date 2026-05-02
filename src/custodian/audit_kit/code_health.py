@@ -153,6 +153,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C32", "hardcoded credential in assignment",                              "open",    detect_c32,  HIGH),
         D("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open",    detect_c33,  LOW),
         D("C34", "commented-out function, class, or decorator definition",          "open",    detect_c34,  LOW),
+        D("C35", "bare `# type: ignore` without specific error code in brackets",   "open",    detect_c35,  LOW),
     ]
 
 
@@ -1068,4 +1069,59 @@ def detect_c34(context: AuditContext) -> DetectorResult:
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{rel}: {line_text[:80]}")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C35: bare `# type: ignore` without error-code brackets ───────────────────
+
+_BARE_TYPE_IGNORE_COMMENT_RE = re.compile(r"#\s*type:\s*ignore(?!\s*\[)")
+
+
+def detect_c35(context: AuditContext) -> DetectorResult:
+    """Flag inline ``# type: ignore`` suppressions that lack a specific error-code.
+
+    ``# type: ignore`` without ``[error-code]`` is a blanket suppression that
+    hides ALL type errors on the line.  When the underlying issue is later fixed
+    the suppression silently masks new errors.  The correct form is::
+
+        some_call()  # type: ignore[attr-defined]
+
+    Uses ``tokenize`` to scan only real comment tokens — string literals and
+    docstrings that discuss ``# type: ignore`` are never flagged.
+    Only inline suppression comments are counted: comment-only lines (where
+    the comment is the only non-whitespace content) are skipped.
+
+    Exclude files via ``audit.exclude_paths.C35``.
+    """
+    import io
+    import tokenize as _tokenize
+
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C35"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        lines = raw.splitlines()
+        try:
+            tokens = list(_tokenize.generate_tokens(io.StringIO(raw).readline))
+        except _tokenize.TokenError:
+            continue
+        for tok_type, tok_string, (lineno, col), _, _ in tokens:
+            if tok_type != _tokenize.COMMENT:
+                continue
+            if not _BARE_TYPE_IGNORE_COMMENT_RE.search(tok_string):
+                continue
+            # Skip comment-only lines — col 0 or nothing but whitespace before #
+            if lineno <= len(lines):
+                line = lines[lineno - 1]
+                before = line[:col].strip()
+                if not before:
+                    continue  # pure comment line, not an active suppression
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                stripped = lines[lineno - 1].strip() if lineno <= len(lines) else tok_string
+                samples.append(f"{rel}:{lineno}: {stripped[:80]}")
     return DetectorResult(count=count, samples=samples)
