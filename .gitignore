@@ -11,7 +11,11 @@ __pycache__/
 .coverage
 
 # Local operator/agent context
-.console/
+.console/*
+!.console/task.md
+!.console/backlog.md
+!.console/guidelines.md
+!.console/log.md
 CLAUDE.md
 .claude/
 
