@@ -94,6 +94,9 @@ audit:
       - src/custodian/audit_kit/detectors/imports.py
       - src/custodian/audit_kit/detectors/annotations.py
       - src/custodian/audit_kit/detectors/complexity.py
+      # _load_codemods() is a documented scaffold: it will grow as codemods are
+      # added; returning [] is not hollow but a "no codemods yet" sentinel.
+      - src/custodian/cli/fix.py
     T1:
       # Detector functions (detect_cN, build_*_detectors) are tested
       # transitively through the CLI and integration test suite; they're

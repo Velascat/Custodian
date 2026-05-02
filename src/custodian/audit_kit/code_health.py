@@ -138,6 +138,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C13", "raw os.environ/os.getenv access outside config layer",            "open",    detect_c13,  MEDIUM),
         D("C28", "hardcoded IP address in string literal",                          "open",    detect_c28,  LOW),
         D("C29", "file exceeds line-count threshold",                               "open",    detect_c29,  LOW),
+        D("C31", "weak hash algorithm (md5/sha1) without usedforsecurity=False",    "open",    detect_c31,  MEDIUM),
         D("C32", "hardcoded credential in assignment",                              "open",    detect_c32,  HIGH),
         D("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open",    detect_c33,  LOW),
     ]
@@ -318,6 +319,47 @@ def detect_c29(context: AuditContext) -> DetectorResult:
 
 
 # ── C31: weak hash algorithms ─────────────────────────────────────────────────
+
+_IMPORTS_HASHLIB_RE = re.compile(r"^\s*import\s+hashlib\b|from\s+hashlib\b", re.MULTILINE)
+_WEAK_HASH_CALL_RE = re.compile(r"\.(md5|sha1)\s*\(", re.IGNORECASE)
+_USEDFORSECURITY_RE = re.compile(r"usedforsecurity\s*=\s*False", re.IGNORECASE)
+
+
+def detect_c31(context: AuditContext) -> DetectorResult:
+    """Flag hashlib.md5() / hashlib.sha1() calls without usedforsecurity=False.
+
+    MD5 and SHA1 are cryptographically broken and should not be used for
+    security-sensitive purposes (MACs, signatures, password hashing).
+    Python 3.9+ added ``usedforsecurity=False`` to explicitly mark
+    non-security uses (e.g. content-addressing, cache keys).  Calls that
+    omit this flag are ambiguous and should be reviewed.
+
+    Only files that import hashlib are scanned to avoid false positives from
+    unrelated methods named ``.md5()`` or ``.sha1()``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C31"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not _IMPORTS_HASHLIB_RE.search(raw):
+            continue
+        for lineno, line in enumerate(raw.splitlines(), 1):
+            m = _WEAK_HASH_CALL_RE.search(line)
+            if not m:
+                continue
+            if _USEDFORSECURITY_RE.search(line):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                rel = path.relative_to(context.repo_root)
+                algo = m.group(1).lower()
+                samples.append(
+                    f"{rel}:{lineno}: .{algo}() — add usedforsecurity=False if non-security use"
+                )
+    return DetectorResult(count=count, samples=samples)
 
 
 # ── C32: hardcoded credentials ────────────────────────────────────────────────
