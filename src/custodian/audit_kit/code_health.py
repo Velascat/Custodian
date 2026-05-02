@@ -154,6 +154,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open",    detect_c33,  LOW),
         D("C34", "commented-out function, class, or decorator definition",          "open",    detect_c34,  LOW),
         D("C35", "bare `# type: ignore` without specific error code in brackets",   "open",    detect_c35,  LOW),
+        D("C36", "built-in open() in text mode without encoding= argument",         "open",    detect_c36,  LOW),
     ]
 
 
@@ -1124,4 +1125,72 @@ def detect_c35(context: AuditContext) -> DetectorResult:
             if len(samples) < _MAX_SAMPLES:
                 stripped = lines[lineno - 1].strip() if lineno <= len(lines) else tok_string
                 samples.append(f"{rel}:{lineno}: {stripped[:80]}")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C36: built-in open() in text mode without encoding= ──────────────────────
+
+_TEXT_OPEN_MODES = frozenset({"r", "w", "a", "x", "r+", "w+", "a+", "x+"})
+
+
+def _is_text_open_mode(mode_node: ast.expr | None) -> bool:
+    """True if the mode node represents a text (non-binary) open mode or is absent."""
+    if mode_node is None:
+        return True  # default mode "r" — text
+    if not isinstance(mode_node, ast.Constant) or not isinstance(mode_node.value, str):
+        return True  # unknown mode — conservatively flag it
+    return mode_node.value.strip('"\'') in _TEXT_OPEN_MODES
+
+
+def detect_c36(context: AuditContext) -> DetectorResult:
+    """Flag built-in ``open()`` calls in text mode without an ``encoding=`` argument.
+
+    ``open(file)`` uses the system locale encoding by default, which differs
+    across platforms and locales.  Code that omits ``encoding=`` silently
+    reads/writes incorrect bytes on non-UTF-8 systems.  Always pass
+    ``encoding="utf-8"`` (or the applicable encoding).
+
+    Only the built-in ``open()`` function is checked — attribute-based opens
+    like ``wave.open()``, ``Image.open()``, or ``webbrowser.open()`` are
+    different APIs and not flagged.  Binary modes (containing ``b``) are
+    skipped.
+
+    Exclude files via ``audit.exclude_paths.C36``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C36"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            # Only the bare built-in open(), not wave.open(), Image.open(), etc.
+            if not (isinstance(func, ast.Name) and func.id == "open"):
+                continue
+            # Second positional argument is the mode (first is the file).
+            mode_node = node.args[1] if len(node.args) >= 2 else None
+            # Also check mode= keyword argument.
+            for kw in node.keywords:
+                if kw.arg == "mode":
+                    mode_node = kw.value
+                    break
+            # Binary modes don't need encoding=
+            if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
+                if "b" in mode_node.value:
+                    continue
+            if not _is_text_open_mode(mode_node):
+                continue
+            # Already has encoding=
+            has_encoding = any(kw.arg == "encoding" for kw in node.keywords)
+            if has_encoding:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{node.lineno}: open() in text mode without encoding=")
     return DetectorResult(count=count, samples=samples)

@@ -6,6 +6,7 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| C36 detector added: built-in open() in text mode without encoding= | AST-based; only flags bare open() not attribute opens (wave/Image/etc); all repos already clean; 9 tests | 2026-05-02 |
 | C35 detector added: bare type: ignore without error-code brackets | Uses tokenize for comment-only scanning (no string/docstring false positives); found 23 in VF, all fixed; 8 tests | 2026-05-02 |
 | C34 detector added: commented-out def/class/decorator definitions | Regex-based; flagged 2 commented-out functions in VF filter_function.py; 9 tests | 2026-05-02 |
 | D8 detector added: value return with implicit None fall-through | Uses _all_paths_terminate() helper; false positives fixed for with-blocks and while True loops; found _initial_authenticate() in VF and fixed it explicitly; 10 tests | 2026-05-02 |
