@@ -94,7 +94,7 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_d4, MEDIUM, _NEEDS_AST),
         Detector("D5", "module-level class never referenced in codebase", "open",
                  detect_d5, LOW, _NEEDS_CG_AND_AST),
-        Detector("D6", "class defined but never instantiated (constructor never called)", "open",
+        Detector("D6", "class referenced but constructor never called — may be incomplete wiring, not dead code", "open",
                  detect_d6, LOW, _NEEDS_CG_AND_AST),
         Detector("D7", "method parameter defined but never used in function body", "open",
                  detect_d7, LOW, _NEEDS_AST),
@@ -212,6 +212,12 @@ def detect_d6(context: AuditContext) -> DetectorResult:
     D6 complements D5: D5 catches classes that are never mentioned at all;
     D6 catches classes that appear in the type system (annotations, imports,
     isinstance checks) but whose constructor is never called anywhere.
+
+    **D6 is investigative, not prescriptive.** A finding means: "something
+    references this class but nothing constructs it." Before removing, check
+    whether the produce-side is simply missing — the class may be a partially
+    wired DTO or a planned extension point, not dead code. Compare with D5
+    (class not referenced at all) which is safer to remove.
 
     Only flags if:
     - name is in cg.called_names (referenced somewhere — D5 skips these)
