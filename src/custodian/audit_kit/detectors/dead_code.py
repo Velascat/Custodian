@@ -104,6 +104,8 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_f3, LOW, _NEEDS_CG),
         Detector("F2", "private module-level constant defined but never referenced", "open",
                  detect_f2, LOW, _NEEDS_AST),
+        Detector("D8", "function returns value on some paths but falls through on others (implicit None)", "open",
+                 detect_d8, LOW, _NEEDS_AST),
     ]
 
 
@@ -1032,5 +1034,130 @@ def detect_f2(context: AuditContext) -> DetectorResult:
                     lineno = getattr(checkable[name], "lineno", 0)
                     rel = path.relative_to(context.repo_root)
                     samples.append(f"{rel}:{lineno}: {name} — defined but never used")
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D8 helpers ────────────────────────────────────────────────────────────────
+
+def _all_paths_terminate(stmts: list[ast.stmt]) -> bool:
+    """True if every code path through stmts ends in a return or raise."""
+    if not stmts:
+        return False
+    last = stmts[-1]
+    if isinstance(last, (ast.Return, ast.Raise)):
+        return True
+    if _is_noreturn_call(last):
+        return True
+    if isinstance(last, ast.If):
+        if not last.orelse:
+            return False  # else branch can fall through
+        return _all_paths_terminate(last.body) and _all_paths_terminate(last.orelse)
+    if isinstance(last, ast.Try):
+        if not _all_paths_terminate(last.body):
+            return False
+        for handler in last.handlers:
+            if not _all_paths_terminate(handler.body):
+                return False
+        return True
+    if isinstance(last, ast.With):
+        return _all_paths_terminate(last.body)
+    if isinstance(last, ast.While):
+        # while True: loops are infinite — execution can't fall past them
+        # unless there's an unconditional break (not modeled here; conservative).
+        cond = last.test
+        if isinstance(cond, ast.Constant) and cond.value is True:
+            return True
+        if isinstance(cond, ast.Name) and cond.id == "True":
+            return True
+    return False
+
+
+def _is_annotated_none(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    ann = func.returns
+    if ann is None:
+        return False
+    if isinstance(ann, ast.Constant) and ann.value is None:
+        return True
+    if isinstance(ann, ast.Name) and ann.id == "None":
+        return True
+    return False
+
+
+def _value_returns_in_scope(stmts: list[ast.stmt]) -> list[ast.Return]:
+    """Collect Return nodes with a non-None, non-bare value (not in nested funcs)."""
+    results: list[ast.Return] = []
+    for stmt in stmts:
+        if isinstance(stmt, ast.Return):
+            v = stmt.value
+            if v is not None and not (isinstance(v, ast.Constant) and v.value is None):
+                results.append(stmt)
+            continue
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue  # nested scope
+        for nested in _stmts_of(stmt):
+            results.extend(_value_returns_in_scope(nested))
+    return results
+
+
+# ── D8 ────────────────────────────────────────────────────────────────────────
+
+def detect_d8(context: AuditContext) -> DetectorResult:
+    """Flag functions that return a value on some paths but fall through on others.
+
+    A function that returns a meaningful value on some branches but has an
+    execution path that falls off the end (implicitly returning None) is almost
+    always a bug — typically a missing ``return`` in one branch, or a guard
+    clause that forgets to propagate the result.
+
+    Exclusions:
+    - Functions annotated ``-> None`` or ``-> NoReturn`` (intentional)
+    - Functions with no value-bearing return at all (void functions)
+    - ``@abstractmethod`` / ``@overload`` stubs
+    - Protocol methods
+    - Exclude paths via ``audit.exclude_paths.D8``
+    """
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    from custodian.audit_kit.code_health import _exclude_globs, _glob_to_regex
+
+    exclude_globs = _exclude_globs(context, "D8")
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel_str = str(path.relative_to(context.repo_root))
+        if exclude_globs and any(_glob_to_regex(g).match(rel_str) for g in exclude_globs):
+            continue
+
+        protocol_names = _protocol_class_names(tree)
+        rel = path.relative_to(context.repo_root)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if _has_decorator(node, "abstractmethod", "overload"):
+                continue
+            container = _direct_class(node, tree)
+            if container and container.name in protocol_names:
+                continue
+            if _is_annotated_none(node) or _is_annotated_noreturn(node):
+                continue
+            if not node.body:
+                continue
+
+            value_rets = _value_returns_in_scope(node.body)
+            if not value_rets:
+                continue  # void function — no value returns at all
+
+            if _all_paths_terminate(node.body):
+                continue  # all paths return or raise — no fall-through
+
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(
+                    f"{rel}:{node.lineno}: {node.name}() — returns value on some paths, falls through on others"
+                )
 
     return DetectorResult(count=count, samples=samples)

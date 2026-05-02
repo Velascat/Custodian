@@ -6,6 +6,9 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| C34 detector added: commented-out def/class/decorator definitions | Regex-based; flagged 2 commented-out functions in VF filter_function.py; 9 tests | 2026-05-02 |
+| D8 detector added: value return with implicit None fall-through | Uses _all_paths_terminate() helper; false positives fixed for with-blocks and while True loops; found _initial_authenticate() in VF and fixed it explicitly; 10 tests | 2026-05-02 |
+| Audit round 3 complete (2026-05-02) | All repos: Custodian=0, VF=1(A1 advisory known), OConsole=0, CxRP=0, OC=0; 593 tests | 2026-05-02 |
 | Audit round 2 complete (2026-05-02) | All repos: Custodian=0, VF=1(A1 advisory), OConsole=0, CxRP=0, OC=155(T1 LOW domain gaps). Dead code removed, vulture FP rate reduced, D7/T1 glob fixed, 502 tests. | 2026-05-02 |
 | Vulture adapter now includes tests_root in scan | False positives for public API functions only called from tests (run_adapters, filter_findings, apply_policy, etc.) — vulture couldn't see test callers; now passes tests_root as additional scan path | 2026-05-02 |
 | D7 and T1 exclusions now use _glob_to_regex from code_health | PurePosixPath.match() doesn't handle src/**/*.py correctly (** needs ≥1 intermediate dir); switched to code_health._glob_to_regex which handles zero-or-more segments | 2026-05-02 |

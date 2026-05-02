@@ -152,6 +152,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C31", "weak hash algorithm (md5/sha1) without usedforsecurity=False",    "open",    detect_c31,  MEDIUM),
         D("C32", "hardcoded credential in assignment",                              "open",    detect_c32,  HIGH),
         D("C33", "file with high ghost-work comment density (TODO/FIXME/HACK/XXX)", "open",    detect_c33,  LOW),
+        D("C34", "commented-out function, class, or decorator definition",          "open",    detect_c34,  LOW),
     ]
 
 
@@ -1020,4 +1021,51 @@ def detect_c20(context: AuditContext) -> DetectorResult:
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{rel}:{node.lineno}: raise {func.id}(...)")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C34: commented-out function / class / decorator definitions ───────────────
+
+# Matches lines where a `def`, `async def`, `class`, or `@decorator` appears
+# right after the `#` marker (with optional leading whitespace on both sides).
+# English prose almost never starts with these keywords after a hash.
+_COMMENTED_DEF_RE = re.compile(
+    r"^\s*#\s*(async\s+def\s+|def\s+|class\s+[A-Za-z_]|@[A-Za-z_]).*",
+    re.MULTILINE,
+)
+
+
+def detect_c34(context: AuditContext) -> DetectorResult:
+    """Flag commented-out ``def``, ``async def``, ``class``, or ``@decorator`` lines.
+
+    A comment that starts with ``def``, ``class``, ``async def``, or a decorator
+    sigil (``@name``) is almost never English prose.  These lines are nearly always
+    production code that was disabled by prepending ``#`` instead of being deleted.
+    Commented-out code accumulates silently, causes merge conflicts, and misleads
+    readers about what the module actually does.
+
+    Exclude files via ``audit.exclude_paths.C34``.
+    Examples that are *not* flagged: ``# type: ignore``, ``# noqa``,
+    ``# see SomeClass for details``, regular sentence comments.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C34"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for match in _COMMENTED_DEF_RE.finditer(text):
+            line_text = match.group(0).strip()
+            # Skip lines that are part of a docstring (heuristic: if the match
+            # falls inside a triple-quote block we'd need a full parse; instead
+            # skip lines where the comment marker is preceded by a quote char).
+            start = match.start()
+            preceding = text[max(0, start - 3):start].strip()
+            if preceding and preceding[-1] in ('"', "'"):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}: {line_text[:80]}")
     return DetectorResult(count=count, samples=samples)
