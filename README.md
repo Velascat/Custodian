@@ -22,7 +22,24 @@ pip install -e .[dev]
 
 ## Detector model
 
-Detectors are defined with IDs that follow namespace conventions like `Cn`, `Fn`, and `Gn`. The built-in v0.1 package includes generic code-health detectors `C1` through `C8`, plus extension points for consumer-defined detectors.
+Detectors are grouped by namespace. Each detector has an ID, a severity (LOW/MEDIUM/HIGH), and a set of analysis passes it requires (none, `ast_forest`, `call_graph`).
+
+| Class | Count | Focus |
+|-------|-------|-------|
+| C | 24 | File-local code health: style, safety, security patterns |
+| D | 9 | Dead code: unreachable paths, unused definitions, no-op constructs |
+| F | 3 | Dead fields: unused dataclass / Pydantic fields and constants |
+| U | 3 | Unimplemented stubs: raise NIE / ellipsis / docstring-only bodies |
+| K | 3 | Documentation consistency: phantom symbols, value drift, param drift |
+| S | 4 | Structure: layer violations, circular imports, test-in-prod imports, conftest guard |
+| A | 2 | Architecture invariants: field counts, directory shape (declarative YAML) |
+| H | 1 | Hexagonal layer ordering violations |
+| T | 3 | Test shape: coverage, assertions, unconditional skips |
+| G | 1 | Ghost work: comment references to removed types |
+| N | 1 | Naming: exception class naming convention |
+| P | 1 | Partial implementations: hollow return bodies |
+
+Consumer repos can add plugin detectors by supplying Python modules via the `plugins` key in `.custodian.yaml`. See `tests/fixtures/sample_consumer/` for a concrete example.
 
 ## Consumer configuration (`.custodian.yaml`)
 

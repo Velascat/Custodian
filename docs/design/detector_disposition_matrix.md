@@ -430,5 +430,45 @@ Every adapter must handle the case where the external tool is not installed:
 
 *C9: delegate catch to Ruff `BLE001`, drop logger-nuance requirement  
 *C11: no Ruff equivalent, keep as advisory  
-*C23: Ruff for pattern, Semgrep for architectural exclusions  
+*C23: Ruff for pattern, Semgrep for architectural exclusions
+
+---
+
+## Post-Phase 0 Detectors (added in sessions 4–5, 2026-05-02)
+
+These detectors were built natively after Phase 0 was complete. All are `custodian_policy` (no external tool equivalent).
+
+### C-class additions
+
+| Code | Description | Severity | Module | Destination | FP Risk | Notes |
+|---|---|---|---|---|---|---|
+| C34 | Commented-out `def`/`class`/decorator definition | LOW | code_health.py | `custodian_policy` | LOW | Regex-based; these patterns are almost never English prose. Found dead commented-out code in VF filter_function.py on first run. |
+| C35 | Bare `# type: ignore` without error-code brackets | LOW | code_health.py | `custodian_policy` | LOW | tokenize-based to avoid string/docstring false positives. Found 23 in VF on first run, all fixed. |
+| C36 | Built-in `open()` in text mode without `encoding=` | LOW | code_health.py | `custodian_policy` | LOW | AST-based; only flags `ast.Name(id="open")` — not `wave.open`, `Image.open`, etc. All repos already clean on first run. |
+
+### D-class additions
+
+| Code | Description | Severity | Module | Destination | FP Risk | Notes |
+|---|---|---|---|---|---|---|
+| D8 | Function returns value on some paths, implicit-None on others | LOW | dead_code.py | `custodian_policy` | LOW | AST-based with `_all_paths_terminate()` helper. Handles `with`-blocks and `while True:` correctly. Found `_initial_authenticate()` fall-through in VF. |
+| D9 | `try/except` handler whose sole statement is a bare `raise` (no-op) | LOW | dead_code.py | `custodian_policy` | LOW | Only flags single-handler try blocks — multi-handler bare reraises are intentional filtering. Found 2 in VF on first run, both removed. |
+
+### K-class (new class — documentation consistency)
+
+| Code | Description | Severity | Module | Destination | FP Risk | Notes |
+|---|---|---|---|---|---|---|
+| K1 | Backtick symbol in docs with no matching `def`/`class` in src | LOW | docs.py | `custodian_policy` | MEDIUM | Skips deferred/deprecated/historical sections. `audit.common_words` and `audit.stale_handlers` suppress known vocabulary. |
+| K2 | Backtick value on a status/state line not present as string literal in src | LOW | docs.py | `custodian_policy` | MEDIUM | `audit.known_values` suppresses common English words that aren't project-specific enum values. |
+| K3 | Google-style docstring `Args:` section names a parameter not in the function signature | LOW | docs.py | `custodian_policy` | LOW | AST-based. `_GOOGLE_SECTION_HEADERS` prevents `Returns`, `Raises`, `Kwargs`, etc. from being treated as parameter names. Found `policy` → `_policy` drift in OC `explain.py` on first run. |
+
+### Other class additions
+
+| Code | Description | Severity | Module | Destination | FP Risk | Notes |
+|---|---|---|---|---|---|---|
+| A2 | Directory structure invariant violation (declarative YAML) | MEDIUM | structure.py | `custodian_policy` | LOW | Generic version of VF's DDD folder-shape check. Config: `architecture.directory_structure` with glob/required_files/required_dirs/exclude. |
+| H1 | Hexagonal architecture layer ordering violation | MEDIUM | structure.py | `custodian_policy` | LOW | Layers declared in `architecture.hex` in order from innermost to outermost; each layer may only import from layers with lower index. More concise than S1's explicit `may_not_import` lists. |
+| N1 | Exception class name does not follow Error/Exception/Warning convention | LOW | naming.py | `custodian_policy` | LOW | AST-based. Flags classes that inherit from `Exception`/`BaseException` but don't end in `Error`, `Exception`, or `Warning`. |
+| T3 | Unconditional `pytest.skip()` without environment gate | LOW | test_shape.py | `custodian_policy` | LOW | Absorbed OC5. Configurable env-gate hints via `audit.t3_env_gate_hints`. |
+| S4 | `tests/conftest.py` missing venv guard | MEDIUM | structure.py | `custodian_policy` | LOW | Detects missing `if not os.environ.get("VIRTUAL_ENV"): pytest.exit(...)` guard. |
+| P1 | Hollow return body (returns only empty collection/None) | LOW | stubs.py | `custodian_policy` | LOW | Absorbed partial-implementation detection alongside U1-U3. |  
 *OC5: pending Ruff PT rule verification

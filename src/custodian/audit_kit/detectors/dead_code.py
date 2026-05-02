@@ -43,6 +43,15 @@ D7  A function/method parameter that is never referenced in the function
     cls, underscore-prefixed params, functions with **kwargs (dynamic
     forwarding), and stub bodies (abstractmethod, overload, pass/ellipsis).
 
+D9  A ``try/except`` handler whose body is a bare ``raise`` with no
+    argument — i.e. the handler immediately re-raises the caught exception
+    unconditionally.  This is a no-op: the exception would propagate
+    identically without the handler.  The pattern usually appears after
+    removing logging or cleanup code from the handler and forgetting to
+    delete the try wrapper.  Handlers that have any statement other than
+    the bare ``raise`` (e.g. logging, cleanup, context attachment) are
+    intentional and are not flagged.
+
 F1  ``@dataclass`` fields never accessed as attributes anywhere in the
     codebase.  Uses the call-graph pass to collect all attribute accesses.
     Conservative: only flags fields whose name does not appear in any
@@ -106,6 +115,8 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_f2, LOW, _NEEDS_AST),
         Detector("D8", "function returns value on some paths but falls through on others (implicit None)", "open",
                  detect_d8, LOW, _NEEDS_AST),
+        Detector("D9", "try/except handler unconditionally re-raises (no-op handler)", "open",
+                 detect_d9, LOW, _NEEDS_AST),
     ]
 
 
@@ -1159,5 +1170,51 @@ def detect_d8(context: AuditContext) -> DetectorResult:
                 samples.append(
                     f"{rel}:{node.lineno}: {node.name}() — returns value on some paths, falls through on others"
                 )
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D9 ────────────────────────────────────────────────────────────────────────
+
+def detect_d9(context: AuditContext) -> DetectorResult:
+    """Flag try/except handlers whose body is only a bare raise (no-op handlers).
+
+    Only flags when the try block has exactly one except handler and its body
+    is a single bare ``raise``.  Multi-handler try blocks where one handler
+    does ``except SpecificError: raise`` are intentional — they let a specific
+    exception escape a broader catch-all below.
+
+    Exclude paths via ``audit.exclude_paths.D9``.
+    """
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    from custodian.audit_kit.code_health import _exclude_globs, _glob_to_regex
+
+    exclude_globs = _exclude_globs(context, "D9")
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel_str = str(path.relative_to(context.repo_root))
+        if exclude_globs and any(_glob_to_regex(g).match(rel_str) for g in exclude_globs):
+            continue
+        rel = path.relative_to(context.repo_root)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try):
+                continue
+            # Only flag when there's exactly one handler — multiple handlers
+            # mean the bare-reraise is filtering which exceptions to pass through.
+            if len(node.handlers) != 1:
+                continue
+            handler = node.handlers[0]
+            body = handler.body
+            if len(body) == 1 and isinstance(body[0], ast.Raise) and body[0].exc is None:
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(
+                        f"{rel}:{handler.lineno}: except handler immediately re-raises — no-op, remove the try/except"
+                    )
 
     return DetectorResult(count=count, samples=samples)
