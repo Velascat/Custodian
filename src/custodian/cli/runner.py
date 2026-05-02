@@ -15,6 +15,7 @@ from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.docs import build_docs_detectors
 from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.imports import build_import_detectors
+from custodian.audit_kit.detectors.naming import build_naming_detectors
 from custodian.audit_kit.detectors.directory import build_directory_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
 from custodian.audit_kit.detectors.stubs import build_stub_detectors
@@ -87,6 +88,7 @@ def run_repo_audit(
                   + build_ghost_detectors()
                   + build_import_detectors()
                   + build_docs_detectors()
+                  + build_naming_detectors()
                   + extra)
 
     if only:

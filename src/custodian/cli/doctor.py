@@ -11,6 +11,7 @@ from custodian.audit_kit.detectors.annotations import build_annotation_detectors
 from custodian.audit_kit.detectors.complexity import build_complexity_detectors
 from custodian.audit_kit.detectors.dead_code import build_dead_code_detectors
 from custodian.audit_kit.detectors.docs import build_docs_detectors
+from custodian.audit_kit.detectors.naming import build_naming_detectors
 from custodian.audit_kit.detectors.ghost import build_ghost_detectors
 from custodian.audit_kit.detectors.imports import build_import_detectors
 from custodian.audit_kit.detectors.structure import build_structure_detectors
@@ -162,6 +163,7 @@ def main():
                                 + build_ghost_detectors()
                                 + build_import_detectors()
                                 + build_docs_detectors()
+                                + build_naming_detectors()
                                 + extra)}
     exclude_paths = (config.get("audit") or {}).get("exclude_paths") or {}
     if isinstance(exclude_paths, dict):
