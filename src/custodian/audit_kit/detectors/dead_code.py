@@ -323,11 +323,18 @@ def detect_d7(context: AuditContext) -> DetectorResult:
     if context.graph is None or context.graph.ast_forest is None:
         return DetectorResult(count=0, samples=[])
 
+    from custodian.audit_kit.code_health import _glob_to_regex
+    audit_cfg: dict = context.config.get("audit") or {}
+    d7_globs: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("D7") or [])
+    d7_patterns = [_glob_to_regex(g) for g in d7_globs]
+
     samples: list[str] = []
     count = 0
 
     for path, tree, _src in context.graph.ast_forest.items():
         rel = path.relative_to(context.repo_root)
+        if d7_patterns and any(p.match(rel.as_posix()) for p in d7_patterns):
+            continue
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

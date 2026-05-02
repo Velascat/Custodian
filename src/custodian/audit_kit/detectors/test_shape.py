@@ -117,20 +117,19 @@ def _parse_test_files(tests_root: Path) -> list[tuple[Path, ast.Module]]:
 
 def _t1_excluded_paths(context: AuditContext) -> set[str]:
     """Repo-relative path strings excluded from T1 via audit.exclude_paths.T1."""
+    from custodian.audit_kit.code_health import _glob_to_regex
     audit_cfg = context.config.get("audit") or {}
     globs: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("T1") or [])
     if not globs:
         return set()
+    patterns = [_glob_to_regex(g) for g in globs]
     excluded: set[str] = set()
     for path in context.src_root.rglob("*.py"):
         if not path.is_file():
             continue
-        rel = str(path.relative_to(context.repo_root))
-        for g in globs:
-            from pathlib import PurePosixPath
-            if PurePosixPath(rel).match(g):
-                excluded.add(str(path))
-                break
+        rel = path.relative_to(context.repo_root).as_posix()
+        if any(p.match(rel) for p in patterns):
+            excluded.add(str(path))
     return excluded
 
 

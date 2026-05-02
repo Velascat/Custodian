@@ -56,6 +56,8 @@ class VultureAdapter(ToolAdapter):
         if not src_root.exists():
             src_root = repo_path
 
+        tests_root = repo_path / config.get("tests_root", "tests")
+
         min_conf = config.get("vulture_min_confidence", self._min_confidence)
 
         cmd = [
@@ -63,6 +65,10 @@ class VultureAdapter(ToolAdapter):
             str(src_root),
             f"--min-confidence={min_conf}",
         ]
+
+        # Include tests so vulture can see call sites for public API functions
+        if tests_root.exists():
+            cmd.append(str(tests_root))
 
         # If a whitelist file exists in the repo, include it
         whitelist = repo_path / ".vulture_whitelist.py"

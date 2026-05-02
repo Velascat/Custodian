@@ -11,19 +11,7 @@ from pathlib import Path
 from custodian.cli import colors
 from custodian.cli.runner import run_repo_audit
 
-_SEV_ORDER = {"high": 0, "medium": 1, "low": 2}
 _SEV_LABEL = {"high": "HIGH", "medium": "MED ", "low": "LOW ", None: "    "}
-
-
-def _worst_severity(patterns: dict) -> str | None:
-    """Return the highest severity among patterns that have findings."""
-    best: str | None = None
-    for pat in patterns.values():
-        if pat.get("count", 0) > 0:
-            sev = pat.get("severity")
-            if sev and (best is None or _SEV_ORDER.get(sev, 99) < _SEV_ORDER.get(best, 99)):
-                best = sev
-    return best
 
 
 def _severity_counts(patterns: dict) -> dict[str, int]:

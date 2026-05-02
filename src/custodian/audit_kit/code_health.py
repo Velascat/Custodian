@@ -296,24 +296,6 @@ def detect_c29(context: AuditContext) -> DetectorResult:
     return DetectorResult(count=count, samples=samples)
 
 
-def _top_level_arg_count(call_body: str) -> int:
-    """Count positional args by counting top-level commas before any keyword (=) arg."""
-    depth = 0
-    commas = 0
-    body = call_body[1:-1] if call_body.startswith("(") else call_body
-    for ch in body:
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
-        elif ch == "," and depth == 0:
-            commas += 1
-        elif ch == "=" and depth == 0:
-            break  # hit a keyword arg
-    return commas + 1 if body.strip() else 0
-
-
-
 # ── C31: weak hash algorithms ─────────────────────────────────────────────────
 
 
