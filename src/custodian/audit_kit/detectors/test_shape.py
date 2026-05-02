@@ -14,6 +14,15 @@ T3  Unconditional pytest.skip() call or @pytest.mark.skip decorator with
     not conditioned on a missing tool, platform, or env var silently
     drops test coverage permanently. Configure extra gate hints via
     ``audit.t3_env_gate_hints`` in ``.custodian.yaml``.
+
+T4  Orphan pytest fixture — a function decorated with ``@pytest.fixture``
+    that is never requested by any test function or other fixture.  An
+    orphan fixture adds setup cost (import, potential side effects) but
+    provides no coverage value.  Fixtures with ``autouse=True`` are
+    excluded (they apply implicitly).  Built-in fixtures (``tmp_path``,
+    ``capsys``, etc.) are not flagged because they are not defined in the
+    codebase.  Fixtures defined in ``conftest.py`` are included in the
+    search but so are their callers across the whole tests tree.
     names and dunder names.  LOW severity — indirect testing via wrappers
     and integration tests will produce false positives.
 
@@ -45,6 +54,8 @@ def build_test_shape_detectors() -> list[Detector]:
                  detect_t2, LOW),
         Detector("T3", "unconditional pytest.skip without environment gate", "open",
                  detect_t3, LOW),
+        Detector("T4", "pytest fixture defined but never requested by any test or fixture", "open",
+                 detect_t4, LOW),
     ]
 
 
@@ -252,3 +263,96 @@ def detect_t3(context: AuditContext) -> DetectorResult:
             if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{rel}:{i}: {line.strip()[:80]}")
     return DetectorResult(count=count, samples=samples)
+
+
+# ── T4 ────────────────────────────────────────────────────────────────────────
+
+def _is_fixture_decorator(dec: ast.expr) -> bool:
+    """Return True if the decorator is @pytest.fixture or @fixture (with or without args)."""
+    if isinstance(dec, ast.Attribute) and dec.attr == "fixture":
+        return True
+    if isinstance(dec, ast.Name) and dec.id == "fixture":
+        return True
+    if isinstance(dec, ast.Call):
+        return _is_fixture_decorator(dec.func)
+    return False
+
+
+def _fixture_is_autouse(dec: ast.expr) -> bool:
+    """Return True if @pytest.fixture(autouse=True) is set."""
+    if not isinstance(dec, ast.Call):
+        return False
+    for kw in dec.keywords:
+        if kw.arg == "autouse" and isinstance(kw.value, ast.Constant) and kw.value.value:
+            return True
+    return False
+
+
+def detect_t4(context: AuditContext) -> DetectorResult:
+    """Flag pytest fixtures that are never requested by any test or other fixture.
+
+    Collects all fixture names across the tests tree (including conftest.py),
+    then collects all parameter names from test functions (``test_*``) and
+    from other fixture functions.  A fixture whose name never appears in any
+    parameter list is an orphan — it adds overhead but provides no coverage.
+
+    Fixtures with ``autouse=True`` are skipped (they apply without being named).
+    Exclude paths via ``audit.exclude_paths.T4``.
+    """
+    if not context.tests_root.is_dir():
+        return DetectorResult(count=0, samples=[])
+
+    audit_cfg = context.config.get("audit") or {}
+    globs: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("T4") or [])
+
+    from pathlib import PurePosixPath
+
+    # Pass 1: collect fixture definitions {name → (path, lineno)}
+    fixture_defs: dict[str, tuple[Path, int]] = {}
+    # Pass 2: collect all parameter names across test functions and fixtures
+    requested_names: set[str] = set()
+
+    all_files: list[tuple[Path, ast.Module]] = _parse_test_files(context.tests_root)
+
+    for path, tree in all_files:
+        rel_str = str(path.relative_to(context.repo_root))
+        if globs and any(PurePosixPath(rel_str).match(g) for g in globs):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            name = node.name
+
+            # Collect parameter names from test functions and fixture functions
+            is_test = name.startswith("test_")
+            is_fix = any(_is_fixture_decorator(d) for d in node.decorator_list)
+
+            if is_test or is_fix:
+                for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+                    if arg.arg not in ("self", "cls"):
+                        requested_names.add(arg.arg)
+
+            # Register fixture definition
+            if is_fix:
+                if any(_fixture_is_autouse(d) for d in node.decorator_list):
+                    continue  # autouse — doesn't need to be requested
+                if name not in fixture_defs:
+                    fixture_defs[name] = (path, node.lineno)
+
+    # Plugin-consumed override fixtures that are implicitly used by third-party plugins
+    # (anyio, asyncio, trio, pytest-asyncio) and never explicitly requested by tests.
+    _PLUGIN_OVERRIDE_FIXTURES = frozenset({
+        "anyio_backend", "event_loop", "event_loop_policy", "asyncio_mode",
+    })
+
+    # Orphans: defined fixtures never appearing in any parameter list
+    orphans = {
+        name: loc for name, loc in fixture_defs.items()
+        if name not in requested_names and name not in _PLUGIN_OVERRIDE_FIXTURES
+    }
+
+    samples = [
+        f"{loc[0].relative_to(context.repo_root)}:{loc[1]}: fixture {name}() — never requested"
+        for name, loc in sorted(orphans.items(), key=lambda x: (str(x[1][0]), x[1][1]))
+    ]
+    return DetectorResult(count=len(orphans), samples=samples[:_MAX_SAMPLES])

@@ -30,6 +30,16 @@ P1  Hollow return bodies — functions whose entire body (after an optional
     ``@abstractmethod``, ``@overload``, Protocol methods, explicitly-void
     functions (``-> None`` annotation), and sink-pattern methods (``**_``
     kwargs absorber — the null-object idiom).
+
+U4  Protocol implementation gap — a concrete class inherits from a Protocol
+    (or a chain that includes a Protocol) but does not implement one or more
+    of the Protocol's non-dunder methods.  Catches partially-completed
+    Protocol implementations: the class is registered as a Protocol consumer
+    but is missing methods, which would fail at runtime when those methods
+    are called.  Only considers methods explicitly defined in the Protocol
+    class itself (not inherited from further bases).  Excludes abstract
+    subclasses (themselves Protocols or ABC subclasses), ``@overload``
+    stubs, and ``__init__``/``__new__`` (not part of a Protocol interface).
 """
 from __future__ import annotations
 
@@ -58,6 +68,8 @@ def build_stub_detectors() -> list[Detector]:
                  detect_u3, LOW, _NEEDS),
         Detector("P1", "hollow return body (returns only empty collection/None)", "open",
                  detect_p1, LOW, _NEEDS),
+        Detector("U4", "concrete class inherits Protocol but is missing Protocol methods", "open",
+                 detect_u4, LOW, _NEEDS),
     ]
 
 
@@ -324,3 +336,105 @@ def detect_p1(context: AuditContext) -> DetectorResult:
             return False
         return True
     return _scan_functions(context, predicate, detector_id="P1")
+
+
+# ── U4 ────────────────────────────────────────────────────────────────────────
+
+def _protocol_method_names(cls: ast.ClassDef) -> set[str]:
+    """Collect non-dunder, non-overload method names defined directly in a Protocol class."""
+    names: set[str] = set()
+    for node in cls.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("__") and node.name.endswith("__"):
+            continue  # dunder not part of structural interface
+        # Skip @overload stubs — they're typing artefacts
+        if any(
+            (isinstance(d, ast.Name) and d.id == "overload") or
+            (isinstance(d, ast.Attribute) and d.attr == "overload")
+            for d in node.decorator_list
+        ):
+            continue
+        names.add(node.name)
+    return names
+
+
+def detect_u4(context: AuditContext) -> DetectorResult:
+    """Flag concrete classes that inherit a Protocol but are missing its methods.
+
+    Exclude paths via ``audit.exclude_paths.U4``.
+    """
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    from custodian.audit_kit.code_health import _exclude_globs, _glob_to_regex
+
+    exclude_globs = _exclude_globs(context, "U4")
+
+    # Pass 1: collect all Protocol classes and their required methods across all files
+    protocol_methods: dict[str, set[str]] = {}  # protocol_name → {method_names}
+    for _path, tree, _src in context.graph.ast_forest.items():
+        proto_names = _protocol_classes(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if node.name in proto_names:
+                methods = _protocol_method_names(node)
+                if methods:  # only track Protocols that actually declare methods
+                    protocol_methods[node.name] = methods
+
+    if not protocol_methods:
+        return DetectorResult(count=0, samples=[])
+
+    # Pass 2: find concrete subclasses and check for gaps
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel_str = str(path.relative_to(context.repo_root))
+        if exclude_globs and any(_glob_to_regex(g).match(rel_str) for g in exclude_globs):
+            continue
+        rel = path.relative_to(context.repo_root)
+
+        this_file_protocols = _protocol_classes(tree)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if node.name in this_file_protocols:
+                continue  # this IS a Protocol — skip
+            if node.name in protocol_methods:
+                continue  # also a protocol defined elsewhere (same name)
+
+            # Collect base class names
+            base_names: set[str] = set()
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    base_names.add(base.id)
+                elif isinstance(base, ast.Attribute):
+                    base_names.add(base.attr)
+
+            # Check if it's itself a Protocol or ABC (abstract — skip)
+            if "Protocol" in base_names or "ABC" in base_names or "ABCMeta" in base_names:
+                continue
+
+            # Find which Protocols this class inherits from
+            for proto_name, required in protocol_methods.items():
+                if proto_name not in base_names:
+                    continue
+                # Collect methods defined anywhere in this class body
+                defined: set[str] = {
+                    n.name for n in ast.walk(node)
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                }
+                missing = required - defined
+                if missing:
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        missing_str = ", ".join(sorted(missing))
+                        samples.append(
+                            f"{rel}:{node.lineno}: {node.name} inherits {proto_name} "
+                            f"but is missing: {missing_str}"
+                        )
+
+    return DetectorResult(count=count, samples=samples)

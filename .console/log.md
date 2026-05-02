@@ -6,6 +6,7 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| T4/U4/C37 detectors added + tests | T4: orphan pytest fixtures (9 tests); U4: Protocol implementation gaps (7 tests); C37: stale audit config keys (7 tests); 663 total tests. OC/VF orphan fixtures deleted; anyio_backend false positive fixed with _PLUGIN_OVERRIDE_FIXTURES | 2026-05-02 |
 | N2 detector added: invisible pytest test functions (in test files, not named test_) | Only scans tests_root; skips @pytest.fixture decorators, private helpers, conftest.py, setup/teardown hooks; found 14 in VF + 23 in OC, all renamed with _ prefix; 10 tests; 639 total | 2026-05-02 |
 | D9 detector added: no-op try/except handler (single handler + bare raise) | Only flags single-handler try blocks — multi-handler bare reraises are intentional exception filtering; found 2 in VF (assembly.py, stage_driver.py) and fixed; 9 tests; 629 total | 2026-05-02 |
 | K3 detector added: Google-style docstring Args section param drift | AST-based; parses Args: sections, compares against actual sig; false positives from Returns/Raises/Kwargs/ALL_CAPS fixed with _GOOGLE_SECTION_HEADERS set; found policy→_policy in OC explain.py; 10 tests; 620 total | 2026-05-02 |

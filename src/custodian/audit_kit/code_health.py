@@ -155,6 +155,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C34", "commented-out function, class, or decorator definition",          "open",    detect_c34,  LOW),
         D("C35", "bare `# type: ignore` without specific error code in brackets",   "open",    detect_c35,  LOW),
         D("C36", "built-in open() in text mode without encoding= argument",         "open",    detect_c36,  LOW),
+        D("C37", "audit config key in .custodian.yaml not read by any source file", "open",    detect_c37,  LOW),
     ]
 
 
@@ -1193,4 +1194,94 @@ def detect_c36(context: AuditContext) -> DetectorResult:
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{rel}:{node.lineno}: open() in text mode without encoding=")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C37 ───────────────────────────────────────────────────────────────────────
+
+def _flatten_yaml_keys(obj: object, prefix: str = "") -> list[str]:
+    """Recursively flatten a YAML dict into dotted key paths.
+
+    Only descends into dicts; list and scalar values terminate the path.
+    The ``audit`` top-level section is the root prefix for Custodian config.
+    """
+    if not isinstance(obj, dict):
+        return []
+    result: list[str] = []
+    for k, v in obj.items():
+        full = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            result.extend(_flatten_yaml_keys(v, full))
+        else:
+            result.append(full)
+    return result
+
+
+def detect_c37(context: AuditContext) -> DetectorResult:
+    """Flag audit keys in .custodian.yaml whose string never appears in source.
+
+    Reads the ``audit:`` section of ``.custodian.yaml`` (if present) and
+    collects every leaf key name.  Then scans all Python source files for
+    that key as a string literal (``"key_name"``).  A key absent from all
+    source files is likely stale from a retired detector and can be removed.
+
+    Only checks simple leaf keys (not dotted paths) to avoid false positives
+    from nested config structures.  ``exclude_paths`` sub-keys are always
+    skipped — they are used generically by the runner, not per-detector code.
+
+    This detector only runs if ``.custodian.yaml`` is present at ``repo_root``.
+    """
+    config_path = context.repo_root / ".custodian.yaml"
+    if not config_path.exists():
+        return DetectorResult(count=0, samples=[])
+
+    try:
+        import yaml  # type: ignore[import-not-found]
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return DetectorResult(count=0, samples=[])
+
+    if not isinstance(raw, dict):
+        return DetectorResult(count=0, samples=[])
+
+    audit_section = raw.get("audit")
+    if not isinstance(audit_section, dict):
+        return DetectorResult(count=0, samples=[])
+
+    # Collect leaf key names in the audit section, skip exclude_paths (generic runner key)
+    candidate_keys: list[str] = []
+    for k in audit_section.keys():
+        if k == "exclude_paths":
+            continue
+        candidate_keys.append(k)
+
+    if not candidate_keys:
+        return DetectorResult(count=0, samples=[])
+
+    # Concatenate all source text once
+    src_text = ""
+    for path in _py_files(context):
+        try:
+            src_text += path.read_text(encoding="utf-8", errors="replace") + "\n"
+        except OSError:
+            continue
+
+    # Also scan plugin modules under repo_root
+    for extra in context.repo_root.rglob("*.py"):
+        if extra.is_relative_to(context.src_root):
+            continue  # already included
+        try:
+            src_text += extra.read_text(encoding="utf-8", errors="replace") + "\n"
+        except OSError:
+            continue
+
+    samples: list[str] = []
+    count = 0
+    for key in sorted(candidate_keys):
+        # Key must appear as a string literal in source
+        if re.search(rf"""['"]{re.escape(key)}['"]""", src_text):
+            continue
+        count += 1
+        if len(samples) < _MAX_SAMPLES:
+            samples.append(f".custodian.yaml: audit.{key} — key never referenced in source")
     return DetectorResult(count=count, samples=samples)
