@@ -24,6 +24,7 @@ from custodian.plugins.loader import load_detectors, load_plugins
 _KNOWN_TOP_LEVEL_KEYS = frozenset({
     "repo_key", "src_root", "tests_root", "plugins", "detectors", "audit", "architecture",
     "maintenance",
+    "tools",  # ruff/vulture/mypy/ty/semgrep adapter toggles
 })
 _KNOWN_AUDIT_KEYS = frozenset({
     "exclude_paths", "stale_handlers", "common_words",
@@ -31,6 +32,8 @@ _KNOWN_AUDIT_KEYS = frozenset({
     "c13_allowed_paths",
     "t3_env_gate_hints",
     "k1_extra_doc_dirs", "known_values",
+    # F1/F3 dead-code keys
+    "f1_exempt", "f3_validate_functions", "f3_exempt",
     # plugin-extension keys (plugins may declare arbitrary audit sub-keys)
     "plugin_audit_keys",
 })
@@ -112,7 +115,7 @@ def _check_config(config: dict, repo: Path, warnings: list[str]) -> list:
                                 f"architecture.layers[{i}].may_not_import must be a list or string"
                             )
             for key in arch:
-                if key not in ("layers",):
+                if key not in ("layers", "invariants", "directory_structure"):
                     warnings.append(f"unknown architecture key {key!r} (typo?)")
 
     return []

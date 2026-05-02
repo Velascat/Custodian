@@ -82,14 +82,14 @@ def _build_src_text(context: AuditContext) -> tuple[str, str]:
     src_text = ""
     for f in _py_files(context):
         try:
-            src_text += f.read_text(errors="replace") + "\n"
+            src_text += f.read_text(encoding="utf-8", errors="replace") + "\n"
         except OSError:
             continue
     tests_text = ""
     if context.tests_root.is_dir():
         for f in context.tests_root.rglob("*.py"):
             try:
-                tests_text += f.read_text(errors="replace") + "\n"
+                tests_text += f.read_text(encoding="utf-8", errors="replace") + "\n"
             except OSError:
                 continue
     return src_text, tests_text
@@ -136,7 +136,7 @@ def detect_k1(context: AuditContext) -> DetectorResult:
     seen: dict[str, tuple[Path, int]] = {}
     for f in _doc_files(context.repo_root, audit_cfg):
         try:
-            text = f.read_text(errors="replace")
+            text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         current_section_deferred = False
@@ -195,7 +195,7 @@ def detect_k2(context: AuditContext) -> DetectorResult:
     seen: dict[str, tuple[Path, int]] = {}
     for f in _doc_files(context.repo_root, audit_cfg):
         try:
-            text = f.read_text(errors="replace")
+            text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         for i, line in enumerate(text.splitlines(), 1):

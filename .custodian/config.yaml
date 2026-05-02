@@ -51,6 +51,10 @@ audit:
       - src/custodian/cli/audit.py
       - src/custodian/cli/doctor.py
       - src/custodian/cli/multi.py
+      - src/custodian/cli/main.py
+      - src/custodian/cli/fix.py
+      - src/custodian/cli/report.py
+      - src/custodian/cli/config_migrate.py
     C7:
       - tests/test_code_health_detectors.py
       - tests/fixtures/**

@@ -132,10 +132,21 @@ def build_code_health_detectors() -> list[Detector]:
     D = Detector
     return [
         D("C1",  "TODO markers in source",                                          "open",    detect_c1,   LOW),
+        D("C2",  "print() call in production code (use logging instead)",           "open",    detect_c2,   LOW),
+        D("C4",  "broad except with pass: bare/Exception/BaseException swallowed",  "open",    detect_c4,   MEDIUM),
         D("C6",  "FIXME markers",                                                   "open",    detect_c6,   LOW),
+        D("C7",  "assert True: meaningless assertion",                              "open",    detect_c7,   LOW),
         D("C8",  "stale handler references",                                        "partial", detect_c8,   MEDIUM),
+        D("C9",  "except … as e handler where e is never used",                     "open",    detect_c9,   MEDIUM),
+        D("C10", "naive datetime: datetime.now()/utcnow() without timezone",        "open",    detect_c10,  MEDIUM),
         D("C11", "subprocess call without timeout",                                 "open",    detect_c11,  MEDIUM),
         D("C13", "raw os.environ/os.getenv access outside config layer",            "open",    detect_c13,  MEDIUM),
+        D("C15", "f-string passed to logger (use %-formatting instead)",            "open",    detect_c15,  LOW),
+        D("C16", "Path.read_text/write_text without encoding=",                     "open",    detect_c16,  LOW),
+        D("C17", "len(x) == 0 / len(x) > 0 comparison (use truthiness)",           "open",    detect_c17,  LOW),
+        D("C18", "f-string with no interpolation (redundant f-prefix)",             "open",    detect_c18,  LOW),
+        D("C20", "raise Exception/BaseException directly (use specific type)",      "open",    detect_c20,  LOW),
+        D("C23", "subprocess call with shell=True (injection risk)",                "open",    detect_c23,  HIGH),
         D("C28", "hardcoded IP address in string literal",                          "open",    detect_c28,  LOW),
         D("C29", "file exceeds line-count threshold",                               "open",    detect_c29,  LOW),
         D("C31", "weak hash algorithm (md5/sha1) without usedforsecurity=False",    "open",    detect_c31,  MEDIUM),
@@ -168,13 +179,73 @@ def detect_c1(context: AuditContext) -> DetectorResult:
     return DetectorResult(count=count, samples=samples)
 
 
+# ── C2: print() in production code ───────────────────────────────────────────
 
 
+def detect_c2(context: AuditContext) -> DetectorResult:
+    """Flag bare print() calls in production source.
+
+    ``print()`` is appropriate in CLI entrypoints but not in library or
+    domain code where structured logging should be used instead.
+    Exclude CLI/entrypoint files via ``audit.exclude_paths.C2``.
+
+    Uses AST-based detection to avoid matching ``print(`` inside string
+    literals (e.g. code passed to ``python -c "...print(...)"``).
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C2"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Name) and func.id == "print"):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{node.lineno}: print() call")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C10: naive datetime ───────────────────────────────────────────────────────
+
+_NAIVE_DT_RE = re.compile(r"\bdatetime\.(?:now|utcnow)\s*\(\s*\)")
+
+
+def detect_c10(context: AuditContext) -> DetectorResult:
+    """Flag datetime.now() / datetime.utcnow() calls without a timezone argument.
+
+    Naive datetimes (no tzinfo) are ambiguous and often produce wrong
+    comparisons when mixed with timezone-aware datetimes.  Use
+    ``datetime.now(tz=timezone.utc)`` or ``datetime.now(tz=UTC)`` instead.
+    ``datetime.utcnow()`` is deprecated in Python 3.12 for the same reason.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C10"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(raw.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _NAIVE_DT_RE.search(line):
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    rel = path.relative_to(context.repo_root)
+                    samples.append(f"{rel}:{lineno}: {line.strip()[:70]}")
+    return DetectorResult(count=count, samples=samples)
 
 
 def detect_c6(context: AuditContext) -> DetectorResult:
     return _count_pattern(_py_files(context, "C6"), re.compile(r"FIXME"))
-
 
 
 def detect_c8(context: AuditContext) -> DetectorResult:
@@ -252,12 +323,164 @@ def detect_c11(context: AuditContext) -> DetectorResult:
     return DetectorResult(count=count, samples=samples)
 
 
+# ── C4: pass-in-except (swallowed exception) ─────────────────────────────────
 
 
+_C4_BROAD_TYPES = frozenset({"Exception", "BaseException"})
 
 
+def detect_c4(context: AuditContext) -> DetectorResult:
+    """Flag broad ``except`` handlers (bare / Exception / BaseException) whose only statement is ``pass``.
+
+    Broadly catching and silently swallowing exceptions hides real errors.
+    Narrow catches (``except ValueError: pass``) are intentional suppression
+    of a known failure mode and are not flagged.
+
+    When suppression is genuinely required, either narrow the exception type,
+    add a logger call, or exclude the file via ``audit.exclude_paths.C4``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C4"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            body = node.body
+            if not (len(body) == 1 and isinstance(body[0], ast.Pass)):
+                continue
+            exc_type = node.type
+            is_broad = (
+                exc_type is None  # bare except:
+                or (isinstance(exc_type, ast.Name) and exc_type.id in _C4_BROAD_TYPES)
+                or (isinstance(exc_type, ast.Attribute) and exc_type.attr in _C4_BROAD_TYPES)
+            )
+            if not is_broad:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                type_str = (
+                    "except:" if exc_type is None
+                    else f"except {exc_type.id if isinstance(exc_type, ast.Name) else exc_type.attr}:"
+                )
+                samples.append(f"{rel}:{node.lineno}: {type_str} pass")
+    return DetectorResult(count=count, samples=samples)
 
 
+# ── C9: broad exception catch with swallowed error ────────────────────────────
+
+
+def _exception_var_referenced(handler: ast.ExceptHandler) -> bool:
+    """Return True if the handler's bound variable is referenced in its body."""
+    if handler.name is None:
+        return False
+    for node in ast.walk(ast.Module(body=handler.body, type_ignores=[])):
+        if isinstance(node, ast.Name) and node.id == handler.name:
+            return True
+    return False
+
+
+def _handler_has_raise(handler: ast.ExceptHandler) -> bool:
+    for node in ast.walk(ast.Module(body=handler.body, type_ignores=[])):
+        if isinstance(node, ast.Raise):
+            return True
+    return False
+
+
+def detect_c9(context: AuditContext) -> DetectorResult:
+    """Flag ``except … as e`` handlers where ``e`` is never referenced in the body.
+
+    Writing ``except Exception as e:`` explicitly binds the exception, signalling
+    intent to use it — but if ``e`` never appears in the handler body, the error
+    information is silently discarded.  Either remove ``as e`` (if suppression is
+    intentional), or actually log/store/re-raise ``e``.
+
+    Handlers without ``as name`` (e.g. bare ``except Exception:``) are not flagged
+    because they make no implicit promise to use the exception object.
+
+    Exclude known-intentional sites via ``audit.exclude_paths.C9``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C9"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            if node.name is None:
+                continue
+            if _exception_var_referenced(node):
+                continue
+            if _handler_has_raise(node):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                exc_type = node.type
+                type_str = (
+                    "except:" if exc_type is None
+                    else f"except {exc_type.id if isinstance(exc_type, ast.Name) else exc_type.attr}:"
+                )
+                samples.append(f"{rel}:{node.lineno}: {type_str} as {node.name} (variable unused)")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C23: subprocess call with shell=True ──────────────────────────────────────
+
+_SUBPROCESS_FUNCS = frozenset({"run", "call", "check_output", "check_call", "Popen"})
+
+
+def detect_c23(context: AuditContext) -> DetectorResult:
+    """Flag ``subprocess`` calls that use ``shell=True``.
+
+    ``shell=True`` passes the command to the OS shell, which introduces a
+    command-injection vector if any part of the command string includes
+    user-controlled input.  Prefer passing a list of arguments instead.
+    Exclude trusted-source usages via ``audit.exclude_paths.C23``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C23"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_subprocess = (
+                isinstance(func, ast.Attribute)
+                and func.attr in _SUBPROCESS_FUNCS
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "subprocess"
+            )
+            if not is_subprocess:
+                continue
+            has_shell_true = any(
+                isinstance(kw, ast.keyword)
+                and kw.arg == "shell"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in node.keywords
+            )
+            if not has_shell_true:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{node.lineno}: subprocess.{func.attr}(..., shell=True)")
+    return DetectorResult(count=count, samples=samples)
 
 
 
@@ -560,4 +783,241 @@ def detect_c13(context: AuditContext) -> DetectorResult:
                 count += 1
                 if len(samples) < _MAX_SAMPLES:
                     samples.append(f"{path}:{lineno}: {line.strip()[:60]}")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C7: assert True (meaningless assertion) ───────────────────────────────────
+
+
+def detect_c7(context: AuditContext) -> DetectorResult:
+    """Flag ``assert True`` — an assertion that always passes and covers nothing.
+
+    ``assert True`` appears in test suites as a placeholder or copy-paste artifact.
+    It provides no coverage signal and masks missing assertions.  Replace with a
+    meaningful assertion or remove it entirely.
+    Exclude fixture files via ``audit.exclude_paths.C7``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C7"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assert):
+                continue
+            test = node.test
+            if isinstance(test, ast.Constant) and test.value is True:
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(f"{rel}:{node.lineno}: assert True")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C15: f-string in logger call (use %-formatting instead) ──────────────────
+
+_LOGGER_METHODS = frozenset({"debug", "info", "warning", "error", "critical", "exception"})
+
+
+def detect_c15(context: AuditContext) -> DetectorResult:
+    """Flag f-strings passed directly to logger calls.
+
+    Logger calls like ``logger.info(f"val={x}")`` evaluate the f-string eagerly
+    even when the log level is suppressed, wasting CPU on string formatting.
+    Use ``logger.info("val=%s", x)`` instead — the format is applied lazily only
+    when the message will actually be emitted.
+    Exclude files via ``audit.exclude_paths.C15``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C15"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr in _LOGGER_METHODS):
+                continue
+            for arg in node.args:
+                if isinstance(arg, ast.JoinedStr):
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(
+                            f"{rel}:{node.lineno}: logger.{func.attr}(f\"...\") — use %s args"
+                        )
+                    break
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C16: Path.read_text / write_text without encoding ────────────────────────
+
+_TEXT_IO_METHODS = frozenset({"read_text", "write_text"})
+
+
+def detect_c16(context: AuditContext) -> DetectorResult:
+    """Flag ``Path.read_text()`` / ``Path.write_text()`` calls missing ``encoding=``.
+
+    Without an explicit encoding the system default is used, which varies
+    across platforms and locales.  Always pass ``encoding="utf-8"`` (or the
+    relevant encoding) to ensure consistent behaviour.
+    Exclude files via ``audit.exclude_paths.C16``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C16"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr in _TEXT_IO_METHODS):
+                continue
+            # Path.read_text() takes 0 positional args; Path.write_text() takes 1.
+            # A call with 2+ positional args is likely a custom write_text(name, data)
+            # method on a non-Path object — skip to avoid false positives.
+            max_pos_args = 1 if func.attr == "write_text" else 0
+            if len(node.args) > max_pos_args:
+                continue
+            has_encoding = any(
+                isinstance(kw, ast.keyword) and kw.arg == "encoding"
+                for kw in node.keywords
+            )
+            if not has_encoding:
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(
+                        f"{rel}:{node.lineno}: .{func.attr}() without encoding="
+                    )
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C17: len(x) == 0 / len(x) > 0 comparison ────────────────────────────────
+
+
+def detect_c17(context: AuditContext) -> DetectorResult:
+    """Flag ``len(x) == 0`` and ``len(x) > 0`` — use ``not x`` / ``bool(x)`` instead.
+
+    Comparing ``len()`` to a literal is less idiomatic and slower than the
+    truthiness check.  ``len(x) == 0`` → ``not x``;  ``len(x) > 0`` → ``x``
+    or ``bool(x)`` (or ``if x:``).
+    Exclude files via ``audit.exclude_paths.C17``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C17"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            left = node.left
+            if not (isinstance(left, ast.Call)
+                    and isinstance(left.func, ast.Name)
+                    and left.func.id == "len"):
+                continue
+            for op, comp in zip(node.ops, node.comparators):
+                if not isinstance(comp, ast.Constant) or comp.value != 0:
+                    continue
+                if isinstance(op, (ast.Eq, ast.NotEq, ast.Gt, ast.GtE, ast.Lt, ast.LtE)):
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(f"{rel}:{node.lineno}: len(...) comparison to 0")
+                    break
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C18: f-string with no interpolation (redundant f-prefix) ─────────────────
+
+
+def detect_c18(context: AuditContext) -> DetectorResult:
+    """Flag f-strings that contain no ``{...}`` interpolation.
+
+    An f-string with no format expression (e.g. ``f"plain text"``) is identical
+    to a plain string but carries the overhead of f-string syntax and confuses
+    readers.  Remove the ``f`` prefix.
+    Exclude files via ``audit.exclude_paths.C18``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C18"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        # format_spec of a FormattedValue is itself a JoinedStr but is not redundant
+        format_spec_ids: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FormattedValue) and node.format_spec is not None:
+                format_spec_ids.add(id(node.format_spec))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.JoinedStr):
+                continue
+            if id(node) in format_spec_ids:
+                continue
+            has_value = any(isinstance(v, ast.FormattedValue) for v in node.values)
+            if not has_value:
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(
+                        f"{rel}:{node.lineno}: f-string with no interpolation"
+                    )
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C20: raise with generic Exception/BaseException ──────────────────────────
+
+_GENERIC_EXCEPTION_NAMES = frozenset({"Exception", "BaseException"})
+
+
+def detect_c20(context: AuditContext) -> DetectorResult:
+    """Flag ``raise Exception(...)`` and ``raise BaseException(...)`` directly.
+
+    Raising a generic ``Exception`` or ``BaseException`` gives callers no way
+    to catch the error selectively.  Define or reuse a specific exception class
+    so that callers can distinguish this failure from others.
+    Exclude files via ``audit.exclude_paths.C20``.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C20"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Raise):
+                continue
+            exc = node.exc
+            if not isinstance(exc, ast.Call):
+                continue
+            func = exc.func
+            is_generic = (
+                isinstance(func, ast.Name) and func.id in _GENERIC_EXCEPTION_NAMES
+            )
+            if not is_generic:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{node.lineno}: raise {func.id}(...)")
     return DetectorResult(count=count, samples=samples)
