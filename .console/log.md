@@ -6,6 +6,7 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| K3 detector added: Google-style docstring Args section param drift | AST-based; parses Args: sections, compares against actual sig; false positives from Returns/Raises/Kwargs/ALL_CAPS fixed with _GOOGLE_SECTION_HEADERS set; found policy→_policy in OC explain.py; 10 tests; 620 total | 2026-05-02 |
 | C36 detector added: built-in open() in text mode without encoding= | AST-based; only flags bare open() not attribute opens (wave/Image/etc); all repos already clean; 9 tests | 2026-05-02 |
 | C35 detector added: bare type: ignore without error-code brackets | Uses tokenize for comment-only scanning (no string/docstring false positives); found 23 in VF, all fixed; 8 tests | 2026-05-02 |
 | C34 detector added: commented-out def/class/decorator definitions | Regex-based; flagged 2 commented-out functions in VF filter_function.py; 9 tests | 2026-05-02 |

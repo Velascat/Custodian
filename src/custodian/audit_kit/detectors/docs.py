@@ -18,6 +18,12 @@ K2  Doc value drift — a backtick-quoted lowercase token on a line that
     ``src/``.  Catches docs that cite stale enum values after a rename.
     Configure ``audit.known_values`` to suppress common English words
     that are not project-specific enum values.
+
+K3  Docstring parameter drift — a function has a Google-style ``Args:``
+    section in its docstring that names a parameter not present in the
+    actual function signature.  Catches docstrings that were not updated
+    after a parameter was renamed or removed.  ``self``, ``cls``,
+    ``*args``, and ``**kwargs`` are excluded from checking.
 """
 from __future__ import annotations
 
@@ -32,12 +38,17 @@ from custodian.audit_kit.code_health import _py_files
 _MAX_SAMPLES = 8
 
 
+import ast as _ast
+
+
 def build_docs_detectors() -> list[Detector]:
     return [
         Detector("K1", "doc references a symbol not found in src (phantom symbol)", "open",
                  detect_k1, LOW),
         Detector("K2", "doc cites a value not present as string literal in src (value drift)", "open",
                  detect_k2, LOW),
+        Detector("K3", "docstring Args section names parameter not in function signature (param drift)", "open",
+                 detect_k3, LOW),
     ]
 
 
@@ -218,3 +229,139 @@ def detect_k2(context: AuditContext) -> DetectorResult:
         for name, (path, ln) in sorted(seen.items())
     ]
     return DetectorResult(count=len(seen), samples=samples[:_MAX_SAMPLES])
+
+
+# ── K3: docstring Args section parameter drift ────────────────────────────────
+
+# Matches a Google-style Args: section header (indented or not)
+_ARGS_HEADER_RE = re.compile(r"^\s*Args:\s*$")
+# Matches a documented parameter name in a Google-style Args section.
+# Allows optional type annotation in parens: `param_name (type): description`
+_ARGS_PARAM_RE = re.compile(r"^\s{4,}(\w+)(?:\s*\(.*?\))?\s*:")
+
+# Google-style section headers that end the Args section
+_GOOGLE_SECTION_HEADERS = frozenset({
+    "Returns", "Return", "Yields", "Yield", "Raises", "Raise",
+    "Note", "Notes", "Example", "Examples", "Attributes", "References",
+    "Todo", "Warning", "Warnings", "See", "Hint", "Kwargs", "Kwarg",
+})
+_SECTION_HEADER_RE = re.compile(r"^(\s*)(\w[\w ]*?):\s*$")
+
+# Parameters that are conventional and not worth checking
+_SKIP_PARAMS = frozenset({"self", "cls", "args", "kwargs"})
+
+
+def _get_docstring(func: _ast.FunctionDef | _ast.AsyncFunctionDef) -> str | None:
+    """Return the docstring of a function node, or None."""
+    if not func.body:
+        return None
+    first = func.body[0]
+    if isinstance(first, _ast.Expr) and isinstance(first.value, _ast.Constant):
+        val = first.value.value
+        if isinstance(val, str):
+            return val
+    return None
+
+
+def _parse_google_args(docstring: str) -> list[str]:
+    """Extract parameter names from a Google-style Args: section."""
+    lines = docstring.splitlines()
+    in_args = False
+    args_indent: int | None = None
+    params: list[str] = []
+    for line in lines:
+        if _ARGS_HEADER_RE.match(line):
+            in_args = True
+            args_indent = None
+            continue
+        if in_args:
+            if not line.strip():
+                continue  # blank lines inside section — keep going
+            # Check for another section header (same or less indentation than Args)
+            sm = _SECTION_HEADER_RE.match(line)
+            if sm and sm.group(2).rstrip() in _GOOGLE_SECTION_HEADERS:
+                in_args = False
+                continue
+            # End section if line is not indented (no leading whitespace)
+            if line and not line[0].isspace():
+                in_args = False
+                continue
+            # A line with ≥4 leading spaces and a colon = parameter entry
+            m = _ARGS_PARAM_RE.match(line)
+            if m:
+                param_name = m.group(1)
+                # Track the indent level of first param to detect section headers at same level
+                if args_indent is None:
+                    args_indent = len(line) - len(line.lstrip())
+                # Skip section headers and ALL_CAPS words (notes within param text)
+                if param_name not in _GOOGLE_SECTION_HEADERS and not param_name.isupper():
+                    params.append(param_name)
+    return params
+
+
+def _func_param_names(func: _ast.FunctionDef | _ast.AsyncFunctionDef) -> set[str]:
+    """Collect all parameter names (excluding *args/**kwargs variadics)."""
+    args = func.args
+    names: set[str] = set()
+    for arg in args.args + args.posonlyargs + args.kwonlyargs:
+        names.add(arg.arg)
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return names - _SKIP_PARAMS
+
+
+def detect_k3(context: AuditContext) -> DetectorResult:
+    """Flag functions whose Google-style Args: docstring names a non-existent param.
+
+    When a parameter is renamed or removed, the docstring is often left
+    pointing at the old name.  K3 catches this by comparing the ``Args:``
+    section of the docstring against the actual function signature.
+
+    Only functions with a Google-style ``Args:`` block are checked.  Sphinx
+    and NumPy docstrings are not parsed.  ``self``, ``cls``, ``*args``,
+    and ``**kwargs`` are excluded.
+
+    Exclude files via ``audit.exclude_paths.K3``.
+    """
+    globs: list[str] = []
+    audit_cfg = context.config.get("audit") or {}
+    exclude = (audit_cfg.get("exclude_paths") or {}).get("K3") or []
+    globs.extend(exclude)
+
+    samples: list[str] = []
+    count = 0
+
+    for path in _py_files(context, "K3"):
+        if globs:
+            from custodian.audit_kit.code_health import _glob_to_regex
+            rel_str = str(path.relative_to(context.repo_root))
+            if any(_glob_to_regex(g).match(rel_str) for g in globs):
+                continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = _ast.parse(raw)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+
+        for node in _ast.walk(tree):
+            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            doc = _get_docstring(node)
+            if doc is None:
+                continue
+            doc_params = _parse_google_args(doc)
+            if not doc_params:
+                continue  # no Args section — nothing to check
+            sig_params = _func_param_names(node)
+            for pname in doc_params:
+                if pname not in sig_params and pname not in _SKIP_PARAMS:
+                    count += 1
+                    if len(samples) < _MAX_SAMPLES:
+                        samples.append(
+                            f"{rel}:{node.lineno}: {node.name}() — docstring Args `{pname}` not in signature"
+                        )
+
+    return DetectorResult(count=count, samples=samples)
