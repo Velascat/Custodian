@@ -52,6 +52,17 @@ D9  A ``try/except`` handler whose body is a bare ``raise`` with no
     the bare ``raise`` (e.g. logging, cleanup, context attachment) are
     intentional and are not flagged.
 
+D10 An ``async def`` function that never uses ``await`` anywhere in its
+    body.  An async function with no await expressions runs synchronously
+    inside the event loop — it blocks the loop if it does any I/O and
+    creates unnecessary coroutine overhead otherwise.  Common causes:
+    a sync-to-async conversion where the implementation wasn't updated,
+    or a helper that was made async "just in case" without a real need.
+    Skips abstract methods, Protocol stubs, overloaded forms, and functions
+    whose body is only ``pass``/``...`` (those are stubs flagged by U-class).
+    Skips ``__aenter__`` / ``__aexit__`` / ``__aiter__`` / ``__anext__``
+    (async protocol dunders that are async by contract).
+
 F1  ``@dataclass`` fields never accessed as attributes anywhere in the
     codebase.  Uses the call-graph pass to collect all attribute accesses.
     Conservative: only flags fields whose name does not appear in any
@@ -117,6 +128,8 @@ def build_dead_code_detectors() -> list[Detector]:
                  detect_d8, LOW, _NEEDS_AST),
         Detector("D9", "try/except handler unconditionally re-raises (no-op handler)", "open",
                  detect_d9, LOW, _NEEDS_AST),
+        Detector("D10", "async def function that never awaits anything", "open",
+                 detect_d10, LOW, _NEEDS_AST),
     ]
 
 
@@ -1216,5 +1229,129 @@ def detect_d9(context: AuditContext) -> DetectorResult:
                     samples.append(
                         f"{rel}:{handler.lineno}: except handler immediately re-raises — no-op, remove the try/except"
                     )
+
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── D10 ───────────────────────────────────────────────────────────────────────
+
+_ASYNC_DUNDER_EXEMPT = frozenset({
+    "__aenter__", "__aexit__", "__aiter__", "__anext__",
+})
+
+# Decorator attribute names that make a function "async by framework contract".
+# Includes FastAPI route methods, event handlers, middleware, and common
+# async context manager decorators.
+_FRAMEWORK_ASYNC_DECORATOR_ATTRS = frozenset({
+    "get", "post", "put", "patch", "delete", "head", "options", "route",
+    "websocket", "on_event", "middleware", "asynccontextmanager",
+    "contextmanager", "lifespan",
+})
+
+
+def _has_await(node: ast.AST) -> bool:
+    """Return True if the subtree contains any Await expression."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Await):
+            return True
+    return False
+
+
+def _has_yield(body: list[ast.stmt]) -> bool:
+    """Return True if the body contains a yield/yield from — async generator."""
+    for node in body:
+        for child in ast.walk(node):
+            if isinstance(child, (ast.Yield, ast.YieldFrom)):
+                return True
+    return False
+
+
+def _is_stub_body(body: list[ast.stmt]) -> bool:
+    """True if the body is a bare stub (pass, ..., or docstring-only)."""
+    stmts = [s for s in body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and isinstance(s.value.value, str))]
+    if not stmts:
+        return True  # docstring-only
+    if len(stmts) == 1:
+        s = stmts[0]
+        if isinstance(s, ast.Pass):
+            return True
+        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is ...:
+            return True
+        if isinstance(s, ast.Raise):
+            return True  # raise NotImplementedError
+    return False
+
+
+def _is_framework_async_decorator(dec: ast.expr) -> bool:
+    """Return True if the decorator makes a function async by framework contract.
+
+    Recognises ``@router.get``, ``@app.on_event``, ``@asynccontextmanager``,
+    and other patterns that require ``async def`` without necessarily awaiting.
+    """
+    if isinstance(dec, ast.Name):
+        return dec.id in _FRAMEWORK_ASYNC_DECORATOR_ATTRS
+    if isinstance(dec, ast.Attribute):
+        return dec.attr in _FRAMEWORK_ASYNC_DECORATOR_ATTRS
+    if isinstance(dec, ast.Call):
+        return _is_framework_async_decorator(dec.func)
+    return False
+
+
+def _has_exempt_decorator(node: ast.AsyncFunctionDef) -> bool:
+    for dec in node.decorator_list:
+        name = None
+        if isinstance(dec, ast.Name):
+            name = dec.id
+        elif isinstance(dec, ast.Attribute):
+            name = dec.attr
+        elif isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name):
+            name = dec.func.id
+        elif isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
+            name = dec.func.attr
+        if name in ("abstractmethod", "overload") or _is_framework_async_decorator(dec):
+            return True
+    return False
+
+
+def detect_d10(context: AuditContext) -> DetectorResult:
+    """Flag async def functions that contain no await expression.
+
+    Skips: abstract/overload stubs, async generators (yield), protocol dunders,
+    and functions decorated with framework-async decorators (FastAPI routes,
+    on_event, middleware, asynccontextmanager, etc.).
+    """
+    if context.graph is None or context.graph.ast_forest is None:
+        return DetectorResult(count=0, samples=[])
+
+    import fnmatch as _fnmatch
+    audit_cfg: dict = context.config.get("audit") or {}
+    excludes: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("D10") or [])
+
+    samples: list[str] = []
+    count = 0
+
+    for path, tree, _src in context.graph.ast_forest.items():
+        rel = path.relative_to(context.repo_root)
+        rel_posix = rel.as_posix()
+        if excludes and any(_fnmatch.fnmatch(rel_posix, excl) for excl in excludes):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef):
+                continue
+            if node.name in _ASYNC_DUNDER_EXEMPT:
+                continue
+            if _has_exempt_decorator(node):
+                continue
+            if _is_stub_body(node.body):
+                continue
+            if _has_yield(node.body):
+                continue  # async generator — yield makes it async by design
+            if _has_await(node):
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(
+                    f"{rel}:{node.lineno}: async def {node.name}() — no await expression"
+                )
 
     return DetectorResult(count=count, samples=samples)

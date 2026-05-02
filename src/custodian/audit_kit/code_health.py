@@ -156,6 +156,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C35", "bare `# type: ignore` without specific error code in brackets",   "open",    detect_c35,  LOW),
         D("C36", "built-in open() in text mode without encoding= argument",         "open",    detect_c36,  LOW),
         D("C37", "audit config key in .custodian.yaml not read by any source file", "open",    detect_c37,  LOW),
+        D("C38", "mutable default argument (list/dict/set literal as default)",      "open",    detect_c38,  MEDIUM),
     ]
 
 
@@ -1284,4 +1285,65 @@ def detect_c37(context: AuditContext) -> DetectorResult:
         count += 1
         if len(samples) < _MAX_SAMPLES:
             samples.append(f".custodian.yaml: audit.{key} — key never referenced in source")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C38: mutable default argument ────────────────────────────────────────────
+
+def detect_c38(context: AuditContext) -> DetectorResult:
+    """Flag function definitions with a mutable literal as a default argument.
+
+    Mutable defaults (``[]``, ``{}``, ``set()``) are shared across all calls that
+    use the default — mutations accumulate across invocations.  Recognized forms:
+
+    - ``def f(x=[]):``  — list literal
+    - ``def f(x={}):``  — dict literal
+    - ``def f(x={1,2}):`` — set literal
+    - ``def f(x=set()):`` — bare ``set()`` call (dict literal covers ``dict()``)
+
+    ``None`` defaults used as sentinels are not flagged.
+    Excludes paths via ``audit.exclude_paths.C38``.
+    """
+    import fnmatch as _fnmatch
+    audit_cfg: dict = context.config.get("audit") or {}
+    excludes: list[str] = list((audit_cfg.get("exclude_paths") or {}).get("C38") or [])
+
+    samples: list[str] = []
+    count = 0
+
+    for path in _py_files(context, "C38"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw, filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        rel_posix = rel.as_posix()
+        if excludes and any(_fnmatch.fnmatch(rel_posix, excl) for excl in excludes):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for default in node.args.defaults + node.args.kw_defaults:
+                if default is None:
+                    continue
+                is_mutable = (
+                    isinstance(default, (ast.List, ast.Dict, ast.Set))
+                    or (
+                        isinstance(default, ast.Call)
+                        and isinstance(default.func, ast.Name)
+                        and default.func.id in ("set", "dict", "list")
+                        and not default.args
+                        and not default.keywords
+                    )
+                )
+                if not is_mutable:
+                    continue
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    kind = type(default).__name__.lower().replace("dict", "{}").replace("list", "[]").replace("set", "set()")
+                    samples.append(
+                        f"{rel}:{node.lineno}: {node.name}() — mutable default {kind}"
+                    )
+                break  # one finding per function
     return DetectorResult(count=count, samples=samples)
