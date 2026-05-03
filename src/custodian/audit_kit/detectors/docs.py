@@ -27,6 +27,7 @@ K3  Docstring parameter drift — a function has a Google-style ``Args:``
 """
 from __future__ import annotations
 
+import ast as _ast
 import re
 from pathlib import Path
 
@@ -36,9 +37,6 @@ from custodian.audit_kit.detector import (
 from custodian.audit_kit.code_health import _py_files
 
 _MAX_SAMPLES = 8
-
-
-import ast as _ast
 
 
 def build_docs_detectors() -> list[Detector]:
