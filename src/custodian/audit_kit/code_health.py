@@ -161,6 +161,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C40", "assert statement in non-test production code (disabled by -O)",    "open",    detect_c40,  LOW),
         D("C41", "json.dumps() without ensure_ascii=False (silently escapes Unicode)", "open", detect_c41, LOW),
         D("C42", "warnings.warn() without stacklevel= (warning points to wrong caller)", "open", detect_c42, LOW),
+        D("C43", "json.dump() without ensure_ascii=False (silently escapes Unicode to file)", "open", detect_c43, LOW),
     ]
 
 
@@ -1588,6 +1589,53 @@ def detect_c42(context: AuditContext) -> DetectorResult:
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{rel}:{node.lineno}: warnings.warn() without stacklevel=")
+    return DetectorResult(count=count, samples=samples)
+
+
+def detect_c43(context: AuditContext) -> DetectorResult:
+    """Flag json.dump(obj, fp) calls that omit ensure_ascii=False.
+
+    The file-write sibling of C41 (json.dumps).  Python's json.dump also
+    defaults to ensure_ascii=True, silently escaping non-ASCII characters to
+    \\uXXXX sequences in the written file.  On platforms that handle
+    international content this produces unreadable files.
+
+    Pass ensure_ascii=False alongside indent= for human-readable output, or
+    suppress with ``# noqa: C43`` for ASCII-only write contexts.
+    """
+    samples: list[str] = []
+    count = 0
+
+    for path in _py_files(context, "C43"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw, filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        src_lines = raw.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_json_dump = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "dump"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "json"
+            )
+            if not is_json_dump:
+                continue
+            if any(kw.arg == "ensure_ascii" for kw in node.keywords):
+                continue
+            line = src_lines[node.lineno - 1] if 0 < node.lineno <= len(src_lines) else ""
+            if "noqa" in line:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(
+                    f"{rel}:{node.lineno}: json.dump() without ensure_ascii=False"
+                )
     return DetectorResult(count=count, samples=samples)
 
 

@@ -6,6 +6,7 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| C43 detector added: json.dump() without ensure_ascii=False | LOW severity; 9 tests; file-write sibling of C41 (json.dumps); VF runners/audio_enhance/pipeline.py fixed; 753 tests total | 2026-05-03 |
 | C42 detector added: warnings.warn() without stacklevel= | LOW severity; 10 tests; catches calls where the warning points to the helper rather than the real caller; 744 tests total | 2026-05-03 |
 | VF C15 tech debt cleared: 163 logger f-strings migrated | AST-based auto-fixer with byte-offset-aware handling for emoji; all 52 VF files fixed; blanket exclusion removed | 2026-05-03 |
 | Custodian self-audit C41 clean | Applied ensure_ascii=False to 4 own json.dumps calls (result.py, multi.py, json_report.py, sarif_report.py) | 2026-05-03 |
