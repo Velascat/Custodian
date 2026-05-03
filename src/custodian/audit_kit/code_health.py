@@ -158,6 +158,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C37", "audit config key in .custodian.yaml not read by any source file", "open",    detect_c37,  LOW),
         D("C38", "mutable default argument (list/dict/set literal as default)",      "open",    detect_c38,  MEDIUM),
         D("C39", "logger.exception() called outside an exception handler",           "open",    detect_c39,  MEDIUM),
+        D("C40", "assert statement in non-test production code (disabled by -O)",    "open",    detect_c40,  LOW),
     ]
 
 
@@ -1407,4 +1408,81 @@ def detect_c39(context: AuditContext) -> DetectorResult:
                 samples.append(
                     f"{rel}:{lineno}: {name}.exception() outside except block — use {name}.error()"
                 )
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C40 ───────────────────────────────────────────────────────────────────────
+
+
+def _collect_assert_linenos(tree: ast.AST) -> list[int]:
+    """Return linenos of assert statements outside `if __debug__:` blocks."""
+
+    def _is_debug_check(test: ast.expr) -> bool:
+        if isinstance(test, ast.Name) and test.id == "__debug__":
+            return True
+        # `if __debug__ and ...:` — BoolOp where first value is __debug__
+        if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+            first = test.values[0] if test.values else None
+            if isinstance(first, ast.Name) and first.id == "__debug__":
+                return True
+        return False
+
+    results: list[int] = []
+
+    def _walk(stmts: list[ast.stmt]) -> None:
+        for stmt in stmts:
+            if isinstance(stmt, ast.Assert):
+                results.append(stmt.lineno)
+            elif isinstance(stmt, ast.If) and _is_debug_check(stmt.test):
+                # skip the body of `if __debug__:` blocks entirely
+                _walk(stmt.orelse)
+            elif isinstance(stmt, (ast.If, ast.While, ast.For)):
+                _walk(stmt.body)
+                _walk(stmt.orelse)
+            elif isinstance(stmt, ast.With):
+                _walk(stmt.body)
+            elif isinstance(stmt, (ast.Try, ast.TryStar)):
+                _walk(stmt.body)
+                _walk(stmt.orelse)
+                _walk(stmt.finalbody if hasattr(stmt, "finalbody") else [])
+                for handler in getattr(stmt, "handlers", []):
+                    _walk(handler.body)
+            elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                _walk(stmt.body)
+
+    _walk(tree.body if isinstance(tree, ast.Module) else [])  # type: ignore[arg-type]
+    return results
+
+
+def detect_c40(context: AuditContext) -> DetectorResult:
+    """Flag assert statements in production (non-test) code.
+
+    Python's assert statement is silently disabled when the interpreter runs
+    with the -O (optimize) flag.  Production invariants must use explicit
+    conditionals with raise statements instead.
+
+    Skips files under tests_root and asserts inside `if __debug__:` blocks
+    (those are intentionally debug-only).  Respects C40 exclude_paths config.
+    """
+    samples: list[str] = []
+    count = 0
+
+    for path in _py_files(context, "C40"):
+        # skip test files
+        if context.tests_root and path.is_relative_to(context.tests_root):
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw, filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        src_lines = raw.splitlines()
+        for lineno in _collect_assert_linenos(tree):
+            line = src_lines[lineno - 1] if 0 < lineno <= len(src_lines) else ""
+            if "noqa" in line:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{lineno}: assert statement — use explicit raise instead")
     return DetectorResult(count=count, samples=samples)
