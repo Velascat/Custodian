@@ -160,6 +160,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C39", "logger.exception() called outside an exception handler",           "open",    detect_c39,  MEDIUM),
         D("C40", "assert statement in non-test production code (disabled by -O)",    "open",    detect_c40,  LOW),
         D("C41", "json.dumps() without ensure_ascii=False (silently escapes Unicode)", "open", detect_c41, LOW),
+        D("C42", "warnings.warn() without stacklevel= (warning points to wrong caller)", "open", detect_c42, LOW),
     ]
 
 
@@ -1537,6 +1538,57 @@ class _JsonDumpsVisitor(ast.NodeVisitor):
         flagged — only the accidental default (missing kwarg) is reported.
         """
         return any(kw.arg == "ensure_ascii" for kw in node.keywords)
+
+
+def detect_c42(context: AuditContext) -> DetectorResult:
+    """Flag ``warnings.warn()`` calls that omit the ``stacklevel=`` argument.
+
+    Without ``stacklevel``, the warning points to the site inside the
+    helper/wrapper that called ``warn()``, not to the external caller.
+    This makes the warning misleading and hard to suppress with
+    ``-W ignore::WarningCategory:module``.
+
+    Add ``stacklevel=2`` when ``warn()`` is inside a one-level wrapper, or
+    ``stacklevel=N`` for deeper nesting.  Use ``stacklevel=1`` (the default)
+    only in top-level code where the call site IS the relevant location.
+
+    When ``stacklevel=1`` is intentional, pass it explicitly to make the
+    intent visible to readers.
+
+    Suppress with ``# noqa: C42`` for sites where the default is deliberate.
+    """
+    samples: list[str] = []
+    count = 0
+
+    for path in _py_files(context, "C42"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw, filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        src_lines = raw.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_warn = (
+                (isinstance(func, ast.Attribute) and func.attr == "warn"
+                 and isinstance(func.value, ast.Name) and func.value.id == "warnings")
+                or (isinstance(func, ast.Name) and func.id == "warn")
+            )
+            if not is_warn:
+                continue
+            has_stacklevel = any(kw.arg == "stacklevel" for kw in node.keywords)
+            if has_stacklevel:
+                continue
+            line = src_lines[node.lineno - 1] if 0 < node.lineno <= len(src_lines) else ""
+            if "noqa" in line:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(f"{rel}:{node.lineno}: warnings.warn() without stacklevel=")
+    return DetectorResult(count=count, samples=samples)
 
 
 def detect_c41(context: AuditContext) -> DetectorResult:

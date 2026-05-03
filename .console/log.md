@@ -6,6 +6,8 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| C42 detector added: warnings.warn() without stacklevel= | LOW severity; 10 tests; catches calls where the warning points to the helper rather than the real caller; 744 tests total | 2026-05-03 |
+| VF C15 tech debt cleared: 163 logger f-strings migrated | AST-based auto-fixer with byte-offset-aware handling for emoji; all 52 VF files fixed; blanket exclusion removed | 2026-05-03 |
 | Custodian self-audit C41 clean | Applied ensure_ascii=False to 4 own json.dumps calls (result.py, multi.py, json_report.py, sarif_report.py) | 2026-05-03 |
 | C41 detector added: json.dumps() without ensure_ascii=False | LOW severity; 13 tests; explicit ensure_ascii=True not flagged (deliberate choice); VF: 26 auto-fixed (single-line) + 4 multi-line manual; SIM115 NamedTemporaryFile → mkstemp in 5 VF files; 734 tests | 2026-05-03 |
 | C40 detector added: assert statement in non-test production code (721 tests) | assert is disabled by python -O; production invariants must use explicit raise. Skips tests_root, `if __debug__:` blocks, `if __debug__ and ...:` guards, # noqa: C40. 12 tests. VF: 19 findings fixed (remove redundant isinstance asserts; convert to if/raise for nlp/cairo/freetype/proc.stdin guards). 721 tests total. | 2026-05-03 |
