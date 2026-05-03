@@ -6,6 +6,9 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| T5 detector added: single-case pytest.mark.parametrize | Flags parametrize decorators with exactly one literal case — should be a plain test with inlined value. Skips variable/comprehension arg lists. 10 tests; 698 total. VF finding fixed (test_script_output_contract.py). | 2026-05-03 |
+| OC2/OC5/OC9 removed from OC plugin; OC3+OC8 kept | OC t3_env_gate_hints added to config (aider, switchboard, etc.); plugin now has only 2 detectors (OC3 orphaned entrypoints, OC8 K1 + field-def awareness). | 2026-05-03 |
+| VF plugin: VF3 dead code removed | _detect_vf3_config_access was unregistered dead code (VF3 already migrated to native C13). VF6 is now the only plugin detector. | 2026-05-03 |
 | C38/D10 detectors added + tests | C38: mutable default argument (list/dict/set); D10: async def without await (skips framework decorators, async generators, stubs); VF gpu release() fixed sync; 25 new tests; 688 total | 2026-05-02 |
 | T4/U4/C37 detectors added + tests | T4: orphan pytest fixtures (9 tests); U4: Protocol implementation gaps (7 tests); C37: stale audit config keys (7 tests); 663 total tests. OC/VF orphan fixtures deleted; anyio_backend false positive fixed with _PLUGIN_OVERRIDE_FIXTURES | 2026-05-02 |
 | N2 detector added: invisible pytest test functions (in test files, not named test_) | Only scans tests_root; skips @pytest.fixture decorators, private helpers, conftest.py, setup/teardown hooks; found 14 in VF + 23 in OC, all renamed with _ prefix; 10 tests; 639 total | 2026-05-02 |

@@ -32,6 +32,12 @@ T2  Test functions with no assertion — a function whose name starts with
     deprecated_call`` context managers, unittest-style ``self.assertX``
     / ``self.failX`` calls, and Mock-style ``mock.assert_called_once()``
     / ``mock.assert_not_called()`` / ``mock.assert_any_call()`` etc.
+
+T5  ``@pytest.mark.parametrize`` with exactly one test case — when a
+    parametrize decorator supplies only a single literal value (or tuple),
+    the parametrize wrapper adds indirection with no benefit; the test
+    should be a regular function with the value inlined.  Only flags
+    literal lists; variable-length argument lists (``[*cases]``) are skipped.
 """
 from __future__ import annotations
 
@@ -56,6 +62,8 @@ def build_test_shape_detectors() -> list[Detector]:
                  detect_t3, LOW),
         Detector("T4", "pytest fixture defined but never requested by any test or fixture", "open",
                  detect_t4, LOW),
+        Detector("T5", "pytest.mark.parametrize with a single test case — should be a plain test", "open",
+                 detect_t5, LOW),
     ]
 
 
@@ -356,3 +364,58 @@ def detect_t4(context: AuditContext) -> DetectorResult:
         for name, loc in sorted(orphans.items(), key=lambda x: (str(x[1][0]), x[1][1]))
     ]
     return DetectorResult(count=len(orphans), samples=samples[:_MAX_SAMPLES])
+
+
+# ── T5 ────────────────────────────────────────────────────────────────────────
+
+def _is_parametrize_decorator(node: ast.expr) -> bool:
+    """Return True if node is pytest.mark.parametrize(...) or mark.parametrize(...)."""
+    if isinstance(node, ast.Call):
+        fn = node.func
+        if isinstance(fn, ast.Attribute) and fn.attr == "parametrize":
+            return True
+    return False
+
+
+def _parametrize_case_count(call: ast.Call) -> int | None:
+    """Return the number of cases in the parametrize call, or None if not determinable."""
+    if len(call.args) < 2:
+        return None
+    cases_arg = call.args[1]
+    if not isinstance(cases_arg, ast.List):
+        return None  # variable reference or comprehension — skip
+    return len(cases_arg.elts)
+
+
+def detect_t5(context: AuditContext) -> DetectorResult:
+    """Flag @pytest.mark.parametrize decorators that supply exactly one test case.
+
+    A single-case parametrize adds parametrize overhead (indirection, generated
+    test ID suffix) with no benefit — the value should be inlined into a plain test.
+    Only flagged when the case list is a literal ``[...]`` with one element; variable
+    and comprehension arguments are skipped to avoid false positives.
+    """
+    if not context.tests_root.is_dir():
+        return DetectorResult(count=0, samples=[])
+
+    count = 0
+    samples: list[str] = []
+
+    for path, tree in _parse_test_files(context.tests_root):
+        rel = str(path.relative_to(context.repo_root))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if not _is_parametrize_decorator(dec):
+                    continue
+                n = _parametrize_case_count(dec)  # type: ignore[arg-type]
+                if n != 1:
+                    continue
+                count += 1
+                if len(samples) < _MAX_SAMPLES:
+                    samples.append(
+                        f"{rel}:{dec.lineno}: {node.name} — parametrize with 1 case; inline the value"
+                    )
+
+    return DetectorResult(count=count, samples=samples)
