@@ -54,7 +54,7 @@ def build_json_report(
         },
         "findings": [f.to_dict() for f in findings],
     }
-    return json.dumps(doc, indent=2)
+    return json.dumps(doc, indent=2, ensure_ascii=False)
 
 
 def write_json_report(

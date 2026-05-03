@@ -78,7 +78,7 @@ def build_sarif_report(
         "version": "2.1.0",
         "runs": runs,
     }
-    return json.dumps(doc, indent=2)
+    return json.dumps(doc, indent=2, ensure_ascii=False)
 
 
 def write_sarif_report(

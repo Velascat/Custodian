@@ -110,7 +110,7 @@ def main():
                 data = json.loads(result.to_json())  # type: ignore[union-attr]
                 data["repo_path"] = str(repo)
                 out.append(data)
-        print(json.dumps(out, indent=2))
+        print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         _print_table(results)
         if args.verbose:

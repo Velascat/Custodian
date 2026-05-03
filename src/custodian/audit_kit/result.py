@@ -43,4 +43,4 @@ class AuditResult:
         """
         d = asdict(self)
         d["findings"] = self.findings()
-        return json.dumps(d, indent=2, sort_keys=True)
+        return json.dumps(d, indent=2, sort_keys=True, ensure_ascii=False)

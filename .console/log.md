@@ -6,6 +6,7 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| Custodian self-audit C41 clean | Applied ensure_ascii=False to 4 own json.dumps calls (result.py, multi.py, json_report.py, sarif_report.py) | 2026-05-03 |
 | C41 detector added: json.dumps() without ensure_ascii=False | LOW severity; 13 tests; explicit ensure_ascii=True not flagged (deliberate choice); VF: 26 auto-fixed (single-line) + 4 multi-line manual; SIM115 NamedTemporaryFile → mkstemp in 5 VF files; 734 tests | 2026-05-03 |
 | C40 detector added: assert statement in non-test production code (721 tests) | assert is disabled by python -O; production invariants must use explicit raise. Skips tests_root, `if __debug__:` blocks, `if __debug__ and ...:` guards, # noqa: C40. 12 tests. VF: 19 findings fixed (remove redundant isinstance asserts; convert to if/raise for nlp/cairo/freetype/proc.stdin guards). 721 tests total. | 2026-05-03 |
 | Custodian self-audit clean + ruff adapter fix; 709 tests | RUFF_NO_CACHE=1 was invalid for newer ruff (exit code 2, silent 0 findings); switched to --no-cache flag. D7 _is_stub_body() now recognizes `return None` and bare `return` as null-object stubs (was flagging NullEmitter implementations). Self-audit 3 ruff findings fixed: docs.py E402 (import order), naming.py F401 (_py_files unused), naming.py F841 (top_class_names dead variable). VF ruff: 284 violations exposed, all resolved; 0 Custodian findings. | 2026-05-03 |
