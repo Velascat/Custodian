@@ -8,7 +8,7 @@ from pathlib import Path
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
 from custodian.audit_kit.detectors.dead_code import detect_d1, detect_f1
-from custodian.audit_kit.passes.call_graph import build_call_graph, CallGraph
+from custodian.audit_kit.passes.call_graph import build_call_graph
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

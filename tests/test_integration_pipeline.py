@@ -4,10 +4,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from custodian.adapters.ruff import RuffAdapter
 from custodian.core.finding import Finding, HIGH, MEDIUM, LOW
 from custodian.core.runner import run_adapters, filter_findings

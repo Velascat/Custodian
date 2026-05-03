@@ -2,10 +2,8 @@
 # Copyright (C) 2026 Velascat
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from custodian.adapters.ty import TyAdapter, _ty_severity
 from custodian.core.finding import HIGH, MEDIUM, LOW
 

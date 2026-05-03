@@ -2,9 +2,7 @@
 # Copyright (C) 2026 Velascat
 from __future__ import annotations
 
-from pathlib import Path
 
-import pytest
 from custodian.codemods.base import Codemod, CodemodeResult, run_codemods
 from custodian.core.finding import Finding, LOW
 

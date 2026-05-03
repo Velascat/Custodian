@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from unittest.mock import patch
-import sys
 
 import pytest
 
@@ -126,7 +125,7 @@ class TestNoJsonFlag:
         out = capsys.readouterr().out
         assert "Custodian audit" in out  # human header
         # JSON block is also present
-        lines = [l for l in out.splitlines() if l.strip().startswith("{")]
+        lines = [ln for ln in out.splitlines() if ln.strip().startswith("{")]
         assert lines  # at least one JSON line
 
 

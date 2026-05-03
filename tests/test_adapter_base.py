@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from custodian.adapters.base import ToolAdapter
-from custodian.core.finding import Finding, HIGH, LOW
+from custodian.core.finding import Finding, HIGH
 from custodian.core.runner import run_adapters, filter_findings
 
 

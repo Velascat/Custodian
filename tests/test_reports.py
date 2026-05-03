@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from custodian.core.finding import Finding, HIGH, MEDIUM, LOW, CRITICAL
 from custodian.reports.json_report import build_json_report
 from custodian.reports.sarif_report import build_sarif_report
@@ -141,8 +140,6 @@ class TestMarkdownReport:
         high_pos = md.index("HIGH")
         med_pos = md.index("MEDIUM")
         low_pos = md.index("LOW")
-        # HIGH comes first (after the summary section HIGH label)
-        lines = md.splitlines()
         # Just verify all three severities are present
         assert high_pos >= 0 and med_pos >= 0 and low_pos >= 0
 

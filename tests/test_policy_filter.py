@@ -2,7 +2,6 @@
 # Copyright (C) 2026 Velascat
 from __future__ import annotations
 
-import pytest
 from custodian.core.finding import Finding, HIGH, MEDIUM, LOW, CRITICAL
 from custodian.policy.filter import apply_policy, policy_from_config
 

@@ -159,6 +159,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C38", "mutable default argument (list/dict/set literal as default)",      "open",    detect_c38,  MEDIUM),
         D("C39", "logger.exception() called outside an exception handler",           "open",    detect_c39,  MEDIUM),
         D("C40", "assert statement in non-test production code (disabled by -O)",    "open",    detect_c40,  LOW),
+        D("C41", "json.dumps() without ensure_ascii=False (silently escapes Unicode)", "open", detect_c41, LOW),
     ]
 
 
@@ -1485,4 +1486,91 @@ def detect_c40(context: AuditContext) -> DetectorResult:
             count += 1
             if len(samples) < _MAX_SAMPLES:
                 samples.append(f"{rel}:{lineno}: assert statement — use explicit raise instead")
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C41 ───────────────────────────────────────────────────────────────────────
+
+
+class _JsonDumpsVisitor(ast.NodeVisitor):
+    """Collect line numbers of json.dumps() calls missing ensure_ascii=False."""
+
+    def __init__(self) -> None:
+        self.hits: list[int] = []
+        # Track whether `dumps` was imported directly from json
+        self._dumps_imported = False
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "json":
+            for alias in node.names:
+                if alias.name == "dumps":
+                    self._dumps_imported = True
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self._is_json_dumps(node):
+            if not self._has_ensure_ascii_false(node):
+                self.hits.append(node.lineno)
+        self.generic_visit(node)
+
+    def _is_json_dumps(self, node: ast.Call) -> bool:
+        func = node.func
+        # json.dumps(...)
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "dumps"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "json"
+        ):
+            return True
+        # from json import dumps; dumps(...)
+        if self._dumps_imported and isinstance(func, ast.Name) and func.id == "dumps":
+            return True
+        return False
+
+    @staticmethod
+    def _has_ensure_ascii_false(node: ast.Call) -> bool:
+        """Return True if the call has any explicit ensure_ascii= kwarg.
+
+        Flags only calls where ensure_ascii is entirely absent.  Explicit
+        ``ensure_ascii=True`` is treated as a deliberate choice and is not
+        flagged — only the accidental default (missing kwarg) is reported.
+        """
+        return any(kw.arg == "ensure_ascii" for kw in node.keywords)
+
+
+def detect_c41(context: AuditContext) -> DetectorResult:
+    """Flag json.dumps() calls that omit ensure_ascii=False.
+
+    Python's json.dumps defaults to ensure_ascii=True, which silently escapes
+    all non-ASCII characters to \\uXXXX sequences.  On a platform that handles
+    international content (scripts, titles, subtitles) this produces unreadable
+    logs and inflated payloads.  Pass ensure_ascii=False unless the output is
+    consumed by a system known to require ASCII-safe JSON.
+
+    Suppress with ``# noqa: C41`` on the call line for hashing/fingerprinting
+    contexts where ensure_ascii consistency is more important than readability.
+    """
+    samples: list[str] = []
+    count = 0
+
+    for path in _py_files(context, "C41"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw, filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        rel = path.relative_to(context.repo_root)
+        src_lines = raw.splitlines()
+        visitor = _JsonDumpsVisitor()
+        visitor.visit(tree)
+        for lineno in visitor.hits:
+            line = src_lines[lineno - 1] if 0 < lineno <= len(src_lines) else ""
+            if "noqa" in line:
+                continue
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(
+                    f"{rel}:{lineno}: json.dumps() without ensure_ascii=False"
+                )
     return DetectorResult(count=count, samples=samples)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from custodian.adapters.vulture import VultureAdapter, _rule_from_message
 from custodian.core.finding import LOW
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
 from custodian.audit_kit.detectors.ghost import detect_g1
-from custodian.audit_kit.passes.symbol_index import build_symbol_index, SymbolIndex
+from custodian.audit_kit.passes.symbol_index import build_symbol_index
 
 
 def _write_src(src: str, tmp_path: Path, name: str = "module.py") -> None:

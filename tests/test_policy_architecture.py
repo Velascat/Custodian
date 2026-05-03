@@ -5,7 +5,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
 from custodian.policy.architecture import run_architecture_policy
 from custodian.core.finding import HIGH
 

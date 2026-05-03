@@ -106,15 +106,15 @@ class TestMigrateV0ToV1:
 class TestConfigSummary:
     def test_shows_version(self):
         lines = config_summary({"version": 1})
-        assert any("1" in l for l in lines)
+        assert any("1" in ln for ln in lines)
 
     def test_shows_repo_key(self):
         cfg = {"repo": {"key": "myrepo"}}
         lines = config_summary(cfg)
-        assert any("myrepo" in l for l in lines)
+        assert any("myrepo" in ln for ln in lines)
 
     def test_shows_tools(self):
         cfg = {"tools": {"ruff": {"enabled": True}, "vulture": {"enabled": False}}}
         lines = config_summary(cfg)
-        assert any("ruff" in l for l in lines)
-        assert any("vulture" in l for l in lines)
+        assert any("ruff" in ln for ln in lines)
+        assert any("vulture" in ln for ln in lines)

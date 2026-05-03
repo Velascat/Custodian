@@ -7,7 +7,6 @@ import ast
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from custodian.audit_kit.detector import AnalysisGraph, AuditContext
 from custodian.audit_kit.detectors.dead_code import detect_d1, detect_d2, detect_d4, detect_d5, detect_d6, detect_f2, detect_f3

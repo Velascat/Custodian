@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from custodian.adapters.mypy import MypyAdapter, _mypy_severity
 from custodian.core.finding import HIGH, MEDIUM, LOW
 

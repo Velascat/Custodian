@@ -2,13 +2,9 @@
 # Copyright (C) 2026 Velascat
 from __future__ import annotations
 
-import pytest
 
 from custodian.audit_kit.code_health import (
     build_code_health_detectors,
-    detect_c1,
-    detect_c6,
-    detect_c8,
     detect_c11,
     detect_c28,
     detect_c29,

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from custodian.adapters.semgrep import SemgrepAdapter, _semgrep_severity
-from custodian.core.finding import HIGH, MEDIUM, LOW, Finding
+from custodian.core.finding import HIGH, MEDIUM, LOW
 
 
 class TestSemgrepSeverityMapping:
