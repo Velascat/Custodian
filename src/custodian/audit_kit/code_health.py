@@ -157,6 +157,7 @@ def build_code_health_detectors() -> list[Detector]:
         D("C36", "built-in open() in text mode without encoding= argument",         "open",    detect_c36,  LOW),
         D("C37", "audit config key in .custodian.yaml not read by any source file", "open",    detect_c37,  LOW),
         D("C38", "mutable default argument (list/dict/set literal as default)",      "open",    detect_c38,  MEDIUM),
+        D("C39", "logger.exception() called outside an exception handler",           "open",    detect_c39,  MEDIUM),
     ]
 
 
@@ -1346,4 +1347,64 @@ def detect_c38(context: AuditContext) -> DetectorResult:
                         f"{rel}:{node.lineno}: {node.name}() — mutable default {kind}"
                     )
                 break  # one finding per function
+    return DetectorResult(count=count, samples=samples)
+
+
+# ── C39: logger.exception() outside except handler ───────────────────────────
+
+
+class _ExceptionContextVisitor(ast.NodeVisitor):
+    """Collect X.exception(...) calls that are not inside any except handler."""
+
+    def __init__(self) -> None:
+        self._depth: int = 0
+        self.findings: list[tuple[int, str]] = []  # (lineno, logger_name)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        self._depth += 1
+        self.generic_visit(node)
+        self._depth -= 1
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if (
+            self._depth == 0
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "exception"
+            and isinstance(node.func.value, ast.Name)
+        ):
+            self.findings.append((node.lineno, node.func.value.id))
+        self.generic_visit(node)
+
+
+def detect_c39(context: AuditContext) -> DetectorResult:
+    """Flag ``logger.exception()`` calls made outside an active exception handler.
+
+    ``logging.Logger.exception()`` attaches the current exception traceback via
+    ``sys.exc_info()``.  When called outside an ``except`` block there is no
+    active exception, so the call logs ``NoneType: None`` as the traceback —
+    a misleading no-op.  The correct replacement is ``logger.error()``.
+
+    Only the *attribute name* ``exception`` is matched (``*.exception(...)``),
+    so the detector is name-agnostic about the logger variable.  Calls to
+    unrelated methods named ``exception`` on other objects (e.g. a pytest
+    ``raises`` result) are therefore also flagged — exclude those paths via
+    ``audit.exclude_paths.C39`` if needed.
+    """
+    samples: list[str] = []
+    count = 0
+    for path in _py_files(context, "C39"):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            tree = ast.parse(raw, filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        visitor = _ExceptionContextVisitor()
+        visitor.visit(tree)
+        rel = path.relative_to(context.repo_root)
+        for lineno, name in visitor.findings:
+            count += 1
+            if len(samples) < _MAX_SAMPLES:
+                samples.append(
+                    f"{rel}:{lineno}: {name}.exception() outside except block — use {name}.error()"
+                )
     return DetectorResult(count=count, samples=samples)

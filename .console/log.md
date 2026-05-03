@@ -6,6 +6,7 @@ _Not a task tracker — that's backlog.md. Keep entries concise and dated._
 ## Recent Decisions
 
 | Decision | Rationale | Date |
+| C39 detector added: logger.exception() outside except handler | AST visitor-based; tracks except handler depth. logger.exception() without active exception logs NoneType:None traceback — fix is logger.error(). 9 tests; 707 total. VF finding: speech/client.py after health check loop. | 2026-05-03 |
 | T5 detector added: single-case pytest.mark.parametrize | Flags parametrize decorators with exactly one literal case — should be a plain test with inlined value. Skips variable/comprehension arg lists. 10 tests; 698 total. VF finding fixed (test_script_output_contract.py). | 2026-05-03 |
 | OC2/OC5/OC9 removed from OC plugin; OC3+OC8 kept | OC t3_env_gate_hints added to config (aider, switchboard, etc.); plugin now has only 2 detectors (OC3 orphaned entrypoints, OC8 K1 + field-def awareness). | 2026-05-03 |
 | VF plugin: VF3 dead code removed | _detect_vf3_config_access was unregistered dead code (VF3 already migrated to native C13). VF6 is now the only plugin detector. | 2026-05-03 |
