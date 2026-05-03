@@ -78,8 +78,8 @@ class RuffAdapter(ToolAdapter):
         if not src_root.exists():
             src_root = repo_path
 
-        cmd = [find_tool("ruff") or "ruff", "check", "--output-format=json", str(src_root), *self._extra_args]
-        env = {**os.environ, "RUFF_NO_CACHE": "1"}
+        cmd = [find_tool("ruff") or "ruff", "check", "--no-cache", "--output-format=json", str(src_root), *self._extra_args]
+        env = os.environ.copy()
 
         try:
             proc = subprocess.run(

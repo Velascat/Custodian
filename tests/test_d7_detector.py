@@ -101,3 +101,16 @@ class Emitter:
         print(payload)
 """, tmp_path)
         assert detect_d7(ctx).count == 0
+
+    def test_return_none_stub_not_flagged(self, tmp_path):
+        # Null-object implementations that just return None are stubs
+        ctx = _make_ctx("""
+class NullEmitter:
+    def emit_json(self, *, trace_id: str, stage_name: str, payload: dict) -> None:
+        return None
+""", tmp_path)
+        assert detect_d7(ctx).count == 0
+
+    def test_bare_return_stub_not_flagged(self, tmp_path):
+        ctx = _make_ctx("def noop(x, y):\n    return\n", tmp_path)
+        assert detect_d7(ctx).count == 0

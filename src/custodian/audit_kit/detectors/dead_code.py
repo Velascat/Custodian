@@ -331,6 +331,11 @@ def _is_stub_body(body: list[ast.stmt]) -> bool:
     # raise NotImplementedError(...) — unimplemented stub
     if len(body) == 1 and _is_raise_not_implemented(body[0]):
         return True
+    # return None / bare return — null-object stub
+    if len(body) == 1 and isinstance(body[0], ast.Return):
+        ret = body[0]
+        if ret.value is None or (isinstance(ret.value, ast.Constant) and ret.value.value is None):
+            return True
     return False
 
 
@@ -1267,7 +1272,7 @@ def _has_yield(body: list[ast.stmt]) -> bool:
 
 
 def _is_stub_body(body: list[ast.stmt]) -> bool:
-    """True if the body is a bare stub (pass, ..., or docstring-only)."""
+    """True if the body is a bare stub (pass, ..., return None, or docstring-only)."""
     stmts = [s for s in body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and isinstance(s.value.value, str))]
     if not stmts:
         return True  # docstring-only
@@ -1279,6 +1284,9 @@ def _is_stub_body(body: list[ast.stmt]) -> bool:
             return True
         if isinstance(s, ast.Raise):
             return True  # raise NotImplementedError
+        if isinstance(s, ast.Return):
+            if s.value is None or (isinstance(s.value, ast.Constant) and s.value.value is None):
+                return True
     return False
 
 
